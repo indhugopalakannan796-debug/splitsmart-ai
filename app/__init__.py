@@ -1,0 +1,1 @@
+# SplitSmart AI Package

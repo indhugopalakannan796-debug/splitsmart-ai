@@ -1,0 +1,2038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SplitSmart — Fair Expense Ledger & PayPal Settlement</title>
+  
+  <!-- Typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            paper: '#F6F1E7',
+            surface: '#FFFDF8',
+            ink: '#1B2A24',
+            muted: '#6B7469',
+            line: '#E3DBC9',
+            primary: {
+              DEFAULT: '#0F4C3A',
+              hover: '#0B3A2C',
+            },
+            accent: '#E8A33D',
+            success: '#2E7D4F',
+            warning: '#B7791F',
+            danger: '#B4442F',
+          },
+          fontFamily: {
+            display: ['Fraunces', 'serif'],
+            sans: ['Manrope', 'sans-serif'],
+            mono: ['"IBM Plex Mono"', 'monospace'],
+          },
+          borderRadius: {
+            control: '10px',
+            panel: '16px',
+          },
+          boxShadow: {
+            soft: '0 1px 3px rgba(27, 42, 36, 0.04), 0 4px 12px rgba(27, 42, 36, 0.03)',
+            elevated: '0 8px 24px rgba(27, 42, 36, 0.08), 0 2px 6px rgba(27, 42, 36, 0.04)',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    :root {
+      --bg-paper: #F6F1E7;
+      --color-surface: #FFFDF8;
+      --color-ink: #1B2A24;
+      --color-muted: #6B7469;
+      --color-line: #E3DBC9;
+      --color-primary: #0F4C3A;
+      --color-accent: #E8A33D;
+      --color-success: #2E7D4F;
+      --color-warning: #B7791F;
+      --color-danger: #B4442F;
+    }
+
+    body {
+      background-color: var(--bg-paper);
+      color: var(--color-ink);
+      font-family: 'Manrope', sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Perforated paper receipt edges */
+    .receipt-perforated-top {
+      position: relative;
+      height: 10px;
+      width: 100%;
+      background: radial-gradient(circle at 10px -4px, transparent 6px, #FFFDF8 7px);
+      background-size: 20px 10px;
+      background-repeat: repeat-x;
+    }
+    
+    .receipt-perforated-bottom {
+      position: relative;
+      height: 10px;
+      width: 100%;
+      background: radial-gradient(circle at 10px 14px, transparent 6px, #FFFDF8 7px);
+      background-size: 20px 10px;
+      background-repeat: repeat-x;
+    }
+
+    /* Subtle paper texture border */
+    .paper-border {
+      border: 1px solid var(--color-line);
+    }
+
+    /* Focus rings */
+    input:focus, select:focus, textarea:focus, button:focus-visible {
+      outline: none;
+      ring: 2px solid var(--color-primary);
+      border-color: var(--color-primary);
+    }
+
+    /* Transition & Reduced Motion */
+    @media (prefers-reduced-motion: reduce) {
+      *, ::before, ::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+    }
+
+    .fade-step {
+      transition: opacity 200ms ease, transform 200ms ease;
+    }
+
+    @keyframes pulseSuccess {
+      0% { background-color: #E2ECE5; }
+      50% { background-color: #C8E3CF; }
+      100% { background-color: transparent; }
+    }
+
+    .flash-paid {
+      animation: pulseSuccess 1.5s ease-out;
+    }
+
+    @keyframes highlightRow {
+      0% { background-color: #F6F0E2; }
+      100% { background-color: transparent; }
+    }
+
+    .ai-highlight {
+      animation: highlightRow 1s ease-out;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased">
+
+  <!-- Accessible Toast Live Region -->
+  <div id="toastContainer" aria-live="polite" class="fixed top-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- Reusable Confirmation Modal -->
+  <div id="confirmModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" class="fixed inset-0 z-50 bg-ink/40 backdrop-blur-[2px] hidden flex items-center justify-center p-4">
+    <div class="bg-surface rounded-panel max-w-sm w-full p-6 shadow-elevated border border-line transform transition-all space-y-4">
+      <div class="flex items-start space-x-3">
+        <div class="w-9 h-9 rounded-control bg-warning/10 text-warning flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+        </div>
+        <div>
+          <h3 id="modalTitle" class="font-display font-semibold text-ink text-base">Reset Demo Data</h3>
+          <p id="modalDesc" class="text-xs text-muted mt-1 leading-relaxed">This will clear all expenses and recorded payments, restoring the original five members.</p>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-2">
+        <button type="button" onclick="closeConfirmModal(false)" class="px-3.5 py-2 text-xs font-semibold text-muted hover:text-ink rounded-control border border-line bg-surface hover:bg-paper transition">
+          Cancel
+        </button>
+        <button type="button" id="modalConfirmBtn" onclick="closeConfirmModal(true)" class="px-3.5 py-2 text-xs font-semibold text-surface rounded-control bg-danger hover:bg-danger/90 shadow-sm transition">
+          Confirm Reset
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reminder Modal -->
+  <div id="reminderModal" role="dialog" aria-modal="true" aria-labelledby="reminderTitle" class="fixed inset-0 z-50 bg-ink/40 backdrop-blur-[2px] hidden flex items-center justify-center p-4">
+    <div class="bg-surface rounded-panel max-w-md w-full p-6 shadow-elevated border border-line transform transition-all space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-line">
+        <div class="flex items-center space-x-2">
+          <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          <h3 id="reminderTitle" class="font-display font-bold text-ink text-base">Payment Reminder</h3>
+        </div>
+        <button type="button" onclick="closeReminderModal()" aria-label="Close dialog" class="text-muted hover:text-ink p-1 rounded-control">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1.5">Select Message Tone</label>
+          <div class="grid grid-cols-3 gap-2">
+            <button type="button" onclick="setTone('friendly')" id="tone-friendly" class="tone-btn py-1.5 px-3 text-xs font-semibold rounded-control border border-primary bg-primary/10 text-primary transition">Friendly</button>
+            <button type="button" onclick="setTone('firm')" id="tone-firm" class="tone-btn py-1.5 px-3 text-xs font-semibold rounded-control border border-line bg-surface text-muted hover:text-ink transition">Firm</button>
+            <button type="button" onclick="setTone('funny')" id="tone-funny" class="tone-btn py-1.5 px-3 text-xs font-semibold rounded-control border border-line bg-surface text-muted hover:text-ink transition">Humorous</button>
+          </div>
+        </div>
+
+        <div class="relative">
+          <div class="flex items-center justify-between mb-1">
+            <label for="reminderText" class="text-[11px] font-bold text-muted uppercase tracking-wider">Drafted Message</label>
+            <span id="reminderMockTag" class="hidden text-[10px] font-mono text-warning bg-warning/10 px-1.5 py-0.5 rounded border border-warning/20">Mock AI</span>
+          </div>
+          <div id="reminderSpinner" class="hidden absolute inset-0 bg-surface/90 flex items-center justify-center rounded-control z-10">
+            <div class="flex items-center space-x-2 text-xs font-semibold text-primary">
+              <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" stroke="currentColor" stroke-dasharray="32" stroke-linecap="round"/></svg>
+              <span>Generating reminder...</span>
+            </div>
+          </div>
+          <textarea id="reminderText" rows="4" class="w-full text-xs p-3 border border-line rounded-control bg-paper/50 font-sans text-ink focus:bg-surface focus:border-primary leading-relaxed" readonly></textarea>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2 pt-2 border-t border-line">
+        <button type="button" onclick="copyReminderText()" class="px-4 py-2 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+          <span id="copyBtnLabel">Copy Message</span>
+        </button>
+        <button type="button" onclick="closeReminderModal()" class="px-3.5 py-2 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header / Top Bar -->
+  <header class="bg-surface border-b border-line sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+      <!-- Left: Brand -->
+      <div class="flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-control bg-primary text-surface flex items-center justify-center font-display font-bold text-sm shadow-sm">
+          S
+        </div>
+        <div class="flex items-baseline space-x-2">
+          <span class="font-display font-bold text-xl tracking-tight text-ink">SplitSmart</span>
+          <span class="text-[11px] font-mono text-muted uppercase tracking-wider hidden sm:inline">Ledger</span>
+        </div>
+      </div>
+
+      <!-- Right: Badges and Header Actions -->
+      <div class="flex items-center space-x-2 sm:space-x-3">
+        <!-- Status Badges -->
+        <span class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono font-medium border border-line bg-paper text-ink">
+          <span class="w-1.5 h-1.5 rounded-full bg-primary"></span>
+          <span>PayPal Sandbox</span>
+        </span>
+        
+        <span id="badgeMockAi" class="hidden inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-warning/15 text-warning border border-warning/30">
+          <span>MOCK AI</span>
+        </span>
+        
+        <span id="badgeMockPaypal" class="hidden inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-warning/15 text-warning border border-warning/30">
+          <span>MOCK PAYPAL</span>
+        </span>
+
+        <div class="h-4 w-px bg-line mx-1 hidden sm:block"></div>
+
+        <button type="button" onclick="startNewExpense()" class="text-xs font-semibold px-3 py-1.5 text-primary hover:text-primary-hover bg-primary/10 hover:bg-primary/15 rounded-control transition border border-primary/20 flex items-center space-x-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+          <span class="hidden sm:inline">Add Expense</span>
+        </button>
+
+        <button type="button" onclick="promptResetDemo()" class="text-xs font-semibold px-2.5 py-1.5 text-muted hover:text-ink rounded-control border border-line bg-surface hover:bg-paper transition" title="Reset Demo Data">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Stepper Bar -->
+    <nav aria-label="Progress Stepper" class="border-t border-line bg-surface/50">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <!-- Desktop Stepper (>=640px) -->
+        <div class="hidden sm:grid sm:grid-cols-4 py-2 text-xs">
+          <button type="button" onclick="goToStep(1)" id="step-nav-1" class="step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-ink font-semibold" aria-current="step">
+            <span class="w-5 h-5 rounded-full bg-primary text-surface flex items-center justify-center font-mono text-[11px] shrink-0">1</span>
+            <span class="truncate">Receipt & Items</span>
+          </button>
+          
+          <button type="button" onclick="goToStep(2)" id="step-nav-2" class="step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-muted hover:text-ink" aria-current="false">
+            <span class="w-5 h-5 rounded-full border border-line bg-paper text-muted flex items-center justify-center font-mono text-[11px] shrink-0">2</span>
+            <span class="truncate">Assign Items</span>
+          </button>
+          
+          <button type="button" onclick="goToStep(3)" id="step-nav-3" class="step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-muted hover:text-ink" aria-current="false">
+            <span class="w-5 h-5 rounded-full border border-line bg-paper text-muted flex items-center justify-center font-mono text-[11px] shrink-0">3</span>
+            <span class="truncate">Fair Breakdown</span>
+          </button>
+          
+          <button type="button" onclick="goToStep(4)" id="step-nav-4" class="step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-muted hover:text-ink" aria-current="false">
+            <span class="w-5 h-5 rounded-full border border-line bg-paper text-muted flex items-center justify-center font-mono text-[11px] shrink-0">4</span>
+            <span class="truncate">Settle Balances</span>
+          </button>
+        </div>
+
+        <!-- Mobile Stepper (<640px) -->
+        <div class="sm:hidden flex items-center justify-between py-2.5 text-xs">
+          <div class="flex items-center space-x-2">
+            <span id="mobileStepBadge" class="w-5 h-5 rounded-full bg-primary text-surface font-mono font-bold flex items-center justify-center text-[10px]">1</span>
+            <span id="mobileStepLabel" class="font-bold text-ink">Step 1 of 4: Receipt</span>
+          </div>
+          <div class="flex items-center space-x-1">
+            <button type="button" id="mobilePrevBtn" onclick="prevStep()" class="p-1 rounded text-muted hover:text-ink disabled:opacity-40" disabled>
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+            <button type="button" id="mobileNextBtn" onclick="nextStep()" class="p-1 rounded text-muted hover:text-ink">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Main Work Area (Two Columns on Desktop) -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 flex-1 w-full pb-28 lg:pb-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      
+      <!-- ========================================================= -->
+      <!-- LEFT COLUMN: ACTIVE STEP (8 cols on lg) -->
+      <!-- ========================================================= -->
+      <div class="lg:col-span-8 space-y-6">
+
+        <!-- ------------------------------------------------------- -->
+        <!-- STEP 1: RECEIPT & ITEMS -->
+        <!-- ------------------------------------------------------- -->
+        <section id="step-panel-1" class="step-panel bg-surface rounded-panel paper-border p-6 sm:p-8 shadow-soft fade-step">
+          <div class="border-b border-line pb-4 flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
+            <div>
+              <h2 class="font-display font-bold text-xl text-ink">Receipt & Extracted Items</h2>
+              <p class="text-xs text-muted mt-1">Upload a receipt photo for Gemini Vision parsing, or load the default demo bill.</p>
+            </div>
+            <button type="button" onclick="loadSampleBill()" class="text-xs font-semibold px-3 py-1.5 text-primary bg-primary/10 hover:bg-primary/15 rounded-control transition border border-primary/20 shrink-0 self-start sm:self-auto">
+              Use Sample Bill
+            </button>
+          </div>
+
+          <!-- Upload Drop Zone & Meta -->
+          <div class="mt-6 grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+            <!-- Drop Zone -->
+            <div id="dropZone" class="md:col-span-7 border border-dashed border-line hover:border-primary rounded-panel p-5 text-center cursor-pointer transition flex flex-col items-center justify-center bg-paper/30 hover:bg-paper/70 group" onclick="document.getElementById('receiptFileInput').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+              <input type="file" id="receiptFileInput" class="hidden" accept="image/*" onchange="handleFileSelected(this.files[0])">
+              
+              <div id="dropZoneDefault" class="flex flex-col items-center space-y-2">
+                <div class="w-10 h-10 rounded-control bg-paper text-muted group-hover:text-primary border border-line flex items-center justify-center transition">
+                  <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="1.75" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                </div>
+                <div>
+                  <span class="text-xs font-semibold text-ink group-hover:text-primary transition">Drop receipt image here, or browse</span>
+                  <p class="text-[11px] text-muted mt-0.5">JPEG, PNG, WEBP (Gemini OCR)</p>
+                </div>
+              </div>
+
+              <!-- Thumbnail view once loaded -->
+              <div id="dropZoneThumb" class="hidden flex items-center space-x-3 w-full">
+                <img id="thumbImg" src="" alt="Receipt Preview" class="w-14 h-14 object-cover rounded-control border border-line shrink-0">
+                <div class="text-left flex-1 min-w-0">
+                  <p id="thumbName" class="text-xs font-semibold text-ink truncate"></p>
+                  <p id="thumbSize" class="text-[11px] text-muted"></p>
+                  <button type="button" onclick="event.stopPropagation(); removeReceiptImage()" class="text-[11px] text-danger hover:underline font-semibold mt-1">Replace image</button>
+                </div>
+              </div>
+
+              <!-- AI Scanning Skeleton -->
+              <div id="ocrLoading" class="hidden flex items-center space-x-2 py-2 text-primary font-semibold text-xs">
+                <svg class="w-4 h-4 animate-spin" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke-width="3" stroke="currentColor" stroke-dasharray="32" stroke-linecap="round"/></svg>
+                <span>Extracting line items with Gemini Vision...</span>
+              </div>
+            </div>
+
+            <!-- Expense Meta Box -->
+            <div class="md:col-span-5 bg-paper/40 p-4 rounded-panel paper-border flex flex-col justify-between space-y-3">
+              <div>
+                <label for="expenseDescription" class="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1">Description</label>
+                <input type="text" id="expenseDescription" value="Team Dinner" class="w-full text-xs font-medium p-2 bg-surface rounded-control paper-border">
+              </div>
+              <div>
+                <label for="paidBySelect" class="block text-[11px] font-bold text-muted uppercase tracking-wider mb-1">Paid By (Payer)</label>
+                <select id="paidBySelect" class="w-full text-xs font-medium p-2 bg-surface rounded-control paper-border">
+                  <!-- Populated with members -->
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Warnings Banner (Hidden unless mismatch or warning) -->
+          <div id="receiptWarningsBanner" class="hidden mt-4 p-3.5 rounded-control bg-warning/10 border border-warning/30 text-warning text-xs space-y-1">
+            <div class="flex items-center space-x-2 font-semibold">
+              <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+              <span>Discrepancy Detected</span>
+            </div>
+            <p id="receiptWarningsText" class="text-[11px] leading-relaxed pl-6"></p>
+            <div class="pl-6 pt-1">
+              <button type="button" onclick="autoAlignBillTotal()" class="text-[11px] font-bold underline hover:opacity-80">
+                Adjust Stated Bill Total to match line items + tax
+              </button>
+            </div>
+          </div>
+
+          <!-- Editable Items Table -->
+          <div class="mt-6 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-[11px] font-bold text-muted uppercase tracking-wider">Line Items (<span id="itemsCountBadge">0</span>)</h3>
+              <button type="button" onclick="addNewItemRow()" class="text-xs font-semibold text-primary hover:text-primary-hover flex items-center space-x-1">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+                <span>Add Item Row</span>
+              </button>
+            </div>
+
+            <div class="overflow-x-auto rounded-control paper-border">
+              <table class="w-full text-left text-xs border-collapse">
+                <thead class="bg-paper text-muted font-bold uppercase tracking-wider text-[10px] sticky top-0 border-b border-line">
+                  <tr>
+                    <th class="py-2.5 px-3">Item Description</th>
+                    <th class="py-2.5 px-3 w-28 text-right">Price (<span class="currency-symbol">$</span>)</th>
+                    <th class="py-2.5 px-3 w-20 text-center">Qty</th>
+                    <th class="py-2.5 px-3 w-28 text-right">Line Total</th>
+                    <th class="py-2.5 px-3 w-12 text-center"></th>
+                  </tr>
+                </thead>
+                <tbody id="itemsTableBody" class="divide-y divide-line bg-surface">
+                  <!-- Injected via renderItemsTable() -->
+                </tbody>
+                <tfoot class="bg-paper/50 font-medium text-ink border-t border-line text-xs">
+                  <tr>
+                    <td colspan="3" class="py-2 px-3 text-right text-muted font-semibold">Items Subtotal:</td>
+                    <td id="tfootSubtotal" class="py-2 px-3 text-right font-mono tabular-nums font-semibold">0.00</td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td colspan="3" class="py-2 px-3 text-right text-muted font-semibold">Tax / GST:</td>
+                    <td class="py-2 px-3 text-right">
+                      <input type="number" step="0.01" id="taxInput" oninput="onTaxOrDiscountChanged()" value="0.00" class="w-24 text-right text-xs font-mono tabular-nums p-1 bg-surface paper-border rounded">
+                    </td>
+                    <td></td>
+                  </tr>
+                  <tr>
+                    <td colspan="3" class="py-2 px-3 text-right text-muted font-semibold">Discount:</td>
+                    <td class="py-2 px-3 text-right">
+                      <input type="number" step="0.01" id="discountInput" oninput="onTaxOrDiscountChanged()" value="0.00" class="w-24 text-right text-xs font-mono tabular-nums p-1 bg-surface paper-border rounded">
+                    </td>
+                    <td></td>
+                  </tr>
+                  <tr class="bg-paper text-ink font-bold border-t border-line">
+                    <td colspan="3" class="py-2.5 px-3 text-right text-xs">Bill Total (<span class="currency-symbol">$</span>):</td>
+                    <td class="py-2.5 px-3 text-right">
+                      <input type="number" step="0.01" id="statedTotalInput" oninput="onStatedTotalChanged()" value="0.00" class="w-24 text-right text-xs font-mono tabular-nums font-bold p-1 bg-surface paper-border rounded">
+                    </td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+
+          <!-- Bottom Action -->
+          <div class="mt-6 flex justify-end pt-4 border-t border-line">
+            <button type="button" onclick="goToStep(2)" class="px-5 py-2.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+              <span>Continue to Assign</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------- -->
+        <!-- STEP 2: ASSIGN ITEMS -->
+        <!-- ------------------------------------------------------- -->
+        <section id="step-panel-2" class="step-panel bg-surface rounded-panel paper-border p-6 sm:p-8 shadow-soft fade-step hidden">
+          <div class="border-b border-line pb-4 flex items-baseline justify-between">
+            <div>
+              <h2 class="font-display font-bold text-xl text-ink">Assign Items to Group</h2>
+              <p class="text-xs text-muted mt-1">Tag each item to who consumed it. Items shared by multiple people are divided equally.</p>
+            </div>
+          </div>
+
+          <!-- Conversational Input Box -->
+          <div class="mt-6 p-4 rounded-panel bg-paper/60 paper-border space-y-2">
+            <div class="flex items-center justify-between">
+              <label for="aiSentenceInput" class="text-[11px] font-bold text-muted uppercase tracking-wider flex items-center space-x-1.5">
+                <svg class="w-3.5 h-3.5 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+                <span>Describe who had what</span>
+              </label>
+              <button type="button" onclick="fillExampleSentence()" class="text-[11px] text-primary hover:underline font-semibold">
+                Use Example
+              </button>
+            </div>
+            
+            <div class="flex flex-col sm:flex-row gap-2">
+              <input type="text" id="aiSentenceInput" placeholder="Indhu had dosa and coffee, Ravi had biryani and soda, everyone shared gulab jamun" class="flex-1 text-xs p-2.5 bg-surface paper-border rounded-control text-ink">
+              <button type="button" id="aiParseBtn" onclick="submitAiSentence()" class="px-4 py-2.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center justify-center space-x-1.5 shrink-0">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                <span>Assign with AI</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Validation Inline Warning -->
+          <div id="unassignedWarning" class="hidden mt-4 p-3 rounded-control bg-danger/10 border border-danger/30 text-danger text-xs flex items-center space-x-2">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span id="unassignedWarningText">Every item must be assigned to at least one person before saving.</span>
+          </div>
+
+          <!-- Assignment Matrix -->
+          <div class="mt-6 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-[11px] font-bold text-muted uppercase tracking-wider">Item × Person Matrix</h3>
+              <span class="text-[11px] text-muted">Click initials to toggle</span>
+            </div>
+
+            <div class="overflow-x-auto rounded-control paper-border">
+              <table class="w-full text-left text-xs border-collapse">
+                <thead class="bg-paper text-muted font-bold uppercase tracking-wider text-[10px] border-b border-line" id="matrixThead">
+                  <!-- Rendered via JS -->
+                </thead>
+                <tbody id="matrixTbody" class="divide-y divide-line bg-surface">
+                  <!-- Rendered via JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Step Buttons -->
+          <div class="mt-8 flex items-center justify-between pt-4 border-t border-line">
+            <button type="button" onclick="goToStep(1)" class="px-4 py-2 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition">
+              ← Back to Receipt
+            </button>
+            <button type="button" id="saveExpenseBtn" onclick="saveAndCalculateSplit()" class="px-5 py-2.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+              <span>Save Expense & Compute Split</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------- -->
+        <!-- STEP 3: FAIR BREAKDOWN -->
+        <!-- ------------------------------------------------------- -->
+        <section id="step-panel-3" class="step-panel bg-surface rounded-panel paper-border p-6 sm:p-8 shadow-soft fade-step hidden">
+          <div class="border-b border-line pb-4 flex items-baseline justify-between">
+            <div>
+              <h2 class="font-display font-bold text-xl text-ink">Fair Share Breakdown</h2>
+              <p class="text-xs text-muted mt-1">Exact proportional allocation via the Largest Remainder Method (Hare-Niemeyer).</p>
+            </div>
+          </div>
+
+          <!-- Cards per person -->
+          <div id="breakdownCardsContainer" class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <!-- Injected via renderBreakdown() -->
+          </div>
+
+          <!-- Exact Sum Check Banner -->
+          <div id="breakdownCheckBanner" class="mt-6 p-4 rounded-panel paper-border flex items-center justify-between bg-paper/50">
+            <div class="flex items-center space-x-3">
+              <div id="breakdownCheckIcon" class="w-6 h-6 rounded-full bg-success text-surface flex items-center justify-center font-bold text-xs shrink-0">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+              </div>
+              <div>
+                <p id="breakdownCheckTitle" class="text-xs font-bold text-ink">Exact Sum Verified</p>
+                <p id="breakdownCheckDesc" class="text-[11px] text-muted font-mono tabular-nums">Sum of individual shares exactly equals the stated bill total.</p>
+              </div>
+            </div>
+            <span class="text-[11px] text-muted font-mono hidden sm:inline">0 discrepancy</span>
+          </div>
+
+          <!-- How this was calculated note -->
+          <div class="mt-4 p-3 rounded-control bg-paper/30 paper-border text-[11px] text-muted flex items-center space-x-2">
+            <svg class="w-4 h-4 text-muted shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            <span>Taxes and discounts are distributed in exact proportion to individual subtotals, rounded without penny loss using the Largest Remainder Method.</span>
+          </div>
+
+          <!-- Step Buttons -->
+          <div class="mt-8 flex items-center justify-between pt-4 border-t border-line">
+            <button type="button" onclick="goToStep(2)" class="px-4 py-2 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition">
+              ← Edit Assignments
+            </button>
+            <button type="button" onclick="goToStep(4)" class="px-5 py-2.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+              <span>Proceed to Settle</span>
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- ------------------------------------------------------- -->
+        <!-- STEP 4: SETTLE & PAYPAL -->
+        <!-- ------------------------------------------------------- -->
+        <section id="step-panel-4" class="step-panel bg-surface rounded-panel paper-border p-6 sm:p-8 shadow-soft fade-step hidden">
+          <div class="border-b border-line pb-4 flex flex-col sm:flex-row sm:items-baseline justify-between gap-2">
+            <div>
+              <h2 class="font-display font-bold text-xl text-ink">Settlement & Transfers</h2>
+              <p class="text-xs text-muted mt-1">Multi-expense debts consolidated into a reduced set of creditor-debtor settlements.</p>
+            </div>
+            <button type="button" onclick="fetchSettlementPlan(true)" class="text-xs font-semibold px-3 py-1.5 text-muted hover:text-ink rounded-control border border-line bg-surface hover:bg-paper transition flex items-center space-x-1 shrink-0 self-start sm:self-auto">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              <span>Refresh Ledger</span>
+            </button>
+          </div>
+
+          <!-- Optimization Comparison Block -->
+          <div class="mt-6 p-4 rounded-panel bg-paper/60 paper-border flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div class="flex items-center space-x-4">
+              <div class="text-center">
+                <span class="block text-[10px] font-bold text-muted uppercase tracking-wider">Before</span>
+                <span id="transfersCountBefore" class="font-display font-bold text-2xl text-muted font-mono tabular-nums">0</span>
+                <span class="block text-[10px] text-muted">transfers</span>
+              </div>
+
+              <div class="text-muted">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              </div>
+
+              <div class="text-center">
+                <span class="block text-[10px] font-bold text-primary uppercase tracking-wider">After</span>
+                <span id="transfersCountAfter" class="font-display font-bold text-2xl text-primary font-mono tabular-nums">0</span>
+                <span class="block text-[10px] text-primary font-semibold">transfers</span>
+              </div>
+            </div>
+
+            <div class="sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-line">
+              <span class="inline-flex items-center space-x-1 text-xs font-semibold text-primary">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                <span>Reduced by the optimizer</span>
+              </span>
+              <p class="text-[11px] text-muted mt-0.5">Greedy creditor-debtor matching resolves all accounts.</p>
+            </div>
+          </div>
+
+          <!-- Net Balances List -->
+          <div class="mt-6 space-y-2">
+            <h3 class="text-[11px] font-bold text-muted uppercase tracking-wider">Net Position per Person</h3>
+            <div id="balancesGrid" class="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Transfers Required -->
+          <div class="mt-6 space-y-3">
+            <div class="flex items-center justify-between">
+              <h3 class="text-[11px] font-bold text-muted uppercase tracking-wider">Recommended Settlements</h3>
+              <span class="text-[11px] text-muted font-mono" id="pollingStatusIndicator">Live tracking active</span>
+            </div>
+
+            <div id="transfersContainer" class="space-y-2.5">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Step Buttons & Extra Actions -->
+          <div class="mt-8 flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-line">
+            <button type="button" onclick="goToStep(3)" class="w-full sm:w-auto px-4 py-2 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition">
+              ← View Breakdown
+            </button>
+            <div class="flex items-center space-x-2 w-full sm:w-auto justify-end">
+              <button type="button" onclick="startNewExpense()" class="w-full sm:w-auto px-4 py-2 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/15 rounded-control transition border border-primary/20">
+                + Add Another Expense
+              </button>
+            </div>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- ========================================================= -->
+      <!-- RIGHT COLUMN: DESKTOP LIVE RECEIPT (4 cols on lg, sticky) -->
+      <!-- ========================================================= -->
+      <aside class="hidden lg:block lg:col-span-4 sticky top-24">
+        <div class="bg-surface rounded-panel paper-border shadow-soft overflow-hidden">
+          
+          <!-- Top Perforation -->
+          <div class="receipt-perforated-top border-b border-line"></div>
+
+          <!-- Ticket Content -->
+          <div class="p-6 space-y-5">
+            <div class="text-center border-b border-line pb-4">
+              <span class="font-display font-bold text-base text-ink tracking-tight">EXPENSE LEDGER</span>
+              <p class="text-[10px] font-mono text-muted uppercase tracking-wider mt-0.5" id="ticketExpenseTitle">Current Bill</p>
+            </div>
+
+            <!-- Live items/people breakdown -->
+            <div class="space-y-3">
+              <div class="flex items-center justify-between text-[11px] font-bold text-muted uppercase tracking-wider">
+                <span>Participant</span>
+                <span>Share</span>
+              </div>
+
+              <div id="ticketMembersList" class="space-y-2 text-xs">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Dashed Divider -->
+            <div class="border-b border-dashed border-line"></div>
+
+            <!-- Total Calculation -->
+            <div class="space-y-1.5 text-xs">
+              <div class="flex justify-between text-muted">
+                <span>Items Subtotal:</span>
+                <span id="ticketSubtotal" class="font-mono tabular-nums">0.00</span>
+              </div>
+              <div class="flex justify-between text-muted">
+                <span>Tax / GST:</span>
+                <span id="ticketTax" class="font-mono tabular-nums">+0.00</span>
+              </div>
+              <div class="flex justify-between text-muted">
+                <span>Discount:</span>
+                <span id="ticketDiscount" class="font-mono tabular-nums">-0.00</span>
+              </div>
+              <div class="flex justify-between text-sm font-bold text-ink pt-2 border-t border-line">
+                <span class="font-display">TOTAL:</span>
+                <span id="ticketTotal" class="font-mono tabular-nums text-primary text-base">0.00</span>
+              </div>
+            </div>
+
+            <!-- Verification Badge -->
+            <div id="ticketVerificationBadge" class="p-2.5 rounded-control text-xs flex items-center justify-between border">
+              <!-- Injected dynamically -->
+            </div>
+          </div>
+
+          <!-- Bottom Perforation -->
+          <div class="receipt-perforated-bottom border-t border-line"></div>
+        </div>
+      </aside>
+
+    </div>
+  </main>
+
+  <!-- =========================================================== -->
+  <!-- MOBILE BOTTOM BAR (Live Ticket Collapse) (<1024px) -->
+  <!-- =========================================================== -->
+  <div class="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-surface border-t border-line shadow-elevated">
+    <!-- Collapsed summary line -->
+    <div class="p-3.5 flex items-center justify-between max-w-7xl mx-auto px-4">
+      <div>
+        <span class="text-[10px] uppercase font-bold text-muted tracking-wider block">Live Total</span>
+        <span id="mobileBottomTotal" class="font-mono tabular-nums text-base font-bold text-primary">0.00</span>
+      </div>
+      <div class="flex items-center space-x-2">
+        <span id="mobileBottomBadge" class="text-[11px] font-mono px-2 py-0.5 rounded border">Balanced</span>
+        <button type="button" onclick="toggleMobileTicketDrawer()" class="text-xs font-semibold px-3 py-1.5 rounded-control border border-line bg-paper hover:bg-line transition flex items-center space-x-1 text-ink">
+          <span id="mobileTicketBtnLabel">View Ticket</span>
+          <svg id="mobileTicketChevron" class="w-3.5 h-3.5 transform transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Expandable Drawer -->
+    <div id="mobileTicketDrawer" class="hidden border-t border-line bg-surface p-4 max-h-[60vh] overflow-y-auto space-y-4">
+      <div class="flex items-center justify-between border-b border-line pb-2">
+        <span class="font-display font-bold text-xs uppercase text-ink">Participant Live Shares</span>
+        <button type="button" onclick="toggleMobileTicketDrawer()" class="text-xs text-muted hover:text-ink">Close</button>
+      </div>
+      <div id="mobileDrawerMembersList" class="space-y-2 text-xs">
+        <!-- Rendered via JS -->
+      </div>
+      <div class="pt-2 border-t border-dashed border-line space-y-1 text-xs">
+        <div class="flex justify-between text-muted">
+          <span>Subtotal:</span>
+          <span id="mobileDrawerSubtotal" class="font-mono tabular-nums">0.00</span>
+        </div>
+        <div class="flex justify-between text-muted">
+          <span>Tax / GST:</span>
+          <span id="mobileDrawerTax" class="font-mono tabular-nums">+0.00</span>
+        </div>
+        <div class="flex justify-between text-muted">
+          <span>Discount:</span>
+          <span id="mobileDrawerDiscount" class="font-mono tabular-nums">-0.00</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-surface border-t border-line py-5 text-center text-xs text-muted">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <p>SplitSmart • Intelligent Fair Splitter & PayPal Sandbox Settlement</p>
+      <p class="font-mono text-[11px]">Strict Integer Minor Math • Hare-Niemeyer Rounding</p>
+    </div>
+  </footer>
+
+  <!-- =========================================================== -->
+  <!-- VANILLA JAVASCRIPT APPLICATION CORE -->
+  <!-- =========================================================== -->
+  <script>
+    // Split deployment configuration (Frontend on Netlify, Backend on Render)
+    if (!window.API_BASE && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+      window.API_BASE = window.location.origin;
+    }
+    const API_BASE = window.API_BASE || "https://YOUR-RENDER-URL.onrender.com";
+
+    // Earthy Muted Deterministic Palette for Avatars
+    const AVATAR_PALETTE = [
+      { bg: '#E2ECE5', text: '#0F4C3A', border: '#BDD5C6' }, // Forest Green
+      { bg: '#F7EBE7', text: '#8C3A27', border: '#E7C6BE' }, // Terracotta
+      { bg: '#F6F0E2', text: '#7A5B18', border: '#E5D8B8' }, // Ochre
+      { bg: '#E3EBEA', text: '#234E52', border: '#BDD2D0' }, // Slate Teal
+      { bg: '#F1EBEF', text: '#5E3550', border: '#DAC4D4' }, // Plum
+      { bg: '#EFECE6', text: '#4E443B', border: '#D4CCC0' }  // Umber
+    ];
+
+    function getAvatarStyle(name) {
+      if (!name) return AVATAR_PALETTE[0];
+      let hash = 0;
+      for (let i = 0; i < name.length; i++) {
+        hash = name.charCodeAt(i) + ((hash << 5) - hash);
+      }
+      return AVATAR_PALETTE[Math.abs(hash) % AVATAR_PALETTE.length];
+    }
+
+    function getInitials(name) {
+      if (!name) return '?';
+      const clean = name.trim();
+      const parts = clean.split(/\s+/);
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+
+    // Single Global State Object
+    const state = {
+      step: 1,
+      currency: "USD",
+      currencySymbol: "$",
+      mockAi: false,
+      mockPaypal: false,
+      members: [],
+      items: [],
+      tax_minor: 0,
+      discount_minor: 0,
+      stated_total_minor: 0,
+      assignments: {}, // item_id -> [member_names]
+      lastBreakdown: null,
+      settlementPlan: null,
+      activeReminderPayment: null,
+      reminderTone: 'friendly',
+      pollingTimer: null,
+      modalCallback: null,
+      mobileDrawerOpen: false
+    };
+
+    // Number Formatting
+    function formatMinor(minor) {
+      const num = (Number(minor || 0) / 100);
+      return new Intl.NumberFormat('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(num);
+    }
+
+    function formatMoney(minor) {
+      return `${state.currencySymbol}${formatMinor(minor)}`;
+    }
+
+    // Toast Notifications
+    function showToast(message, type = "info") {
+      const container = document.getElementById("toastContainer");
+      const toast = document.createElement("div");
+      
+      let borderCol = "border-line";
+      let bgCol = "bg-surface";
+      let textCol = "text-ink";
+      let iconSvg = `<svg class="w-4 h-4 text-primary shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`;
+      
+      if (type === "success") {
+        borderCol = "border-success/30";
+        bgCol = "bg-surface";
+        iconSvg = `<svg class="w-4 h-4 text-success shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+      } else if (type === "warning") {
+        borderCol = "border-warning/30";
+        iconSvg = `<svg class="w-4 h-4 text-warning shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>`;
+      } else if (type === "danger" || type === "error") {
+        borderCol = "border-danger/30";
+        iconSvg = `<svg class="w-4 h-4 text-danger shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`;
+      }
+
+      toast.className = `pointer-events-auto p-3.5 rounded-control shadow-elevated border ${borderCol} ${bgCol} ${textCol} text-xs font-medium flex items-center space-x-2.5 max-w-sm transform transition-all duration-300 opacity-0 translate-y-2`;
+      toast.innerHTML = `
+        ${iconSvg}
+        <span class="flex-1">${escapeHtml(message)}</span>
+      `;
+      container.appendChild(toast);
+
+      requestAnimationFrame(() => {
+        toast.classList.remove("opacity-0", "translate-y-2");
+      });
+
+      setTimeout(() => {
+        toast.classList.add("opacity-0", "translate-y-2");
+        setTimeout(() => toast.remove(), 300);
+      }, 4000);
+    }
+
+    // Custom Confirmation Modal
+    function openConfirmModal(title, desc, callback) {
+      document.getElementById("modalTitle").textContent = title;
+      document.getElementById("modalDesc").textContent = desc;
+      state.modalCallback = callback;
+      document.getElementById("confirmModal").classList.remove("hidden");
+    }
+
+    function closeConfirmModal(confirmed) {
+      document.getElementById("confirmModal").classList.add("hidden");
+      if (confirmed && typeof state.modalCallback === "function") {
+        state.modalCallback();
+      }
+      state.modalCallback = null;
+    }
+
+    // Navigation and Stepper
+    function goToStep(targetStep) {
+      // Validate step 2 progression
+      if (state.step === 2 && targetStep > 2) {
+        if (!validateAssignments()) return;
+      }
+
+      state.step = targetStep;
+
+      // Update Desktop Stepper
+      document.querySelectorAll(".step-nav").forEach((btn, idx) => {
+        const stepNum = idx + 1;
+        const iconSpan = btn.querySelector("span:first-child");
+        btn.setAttribute("aria-current", stepNum === targetStep ? "step" : "false");
+
+        if (stepNum === targetStep) {
+          btn.className = "step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-ink font-semibold bg-paper/60";
+          iconSpan.className = "w-5 h-5 rounded-full bg-primary text-surface flex items-center justify-center font-mono text-[11px] shrink-0 font-bold";
+          iconSpan.innerHTML = `${stepNum}`;
+        } else if (stepNum < targetStep) {
+          btn.className = "step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-ink font-medium hover:bg-paper/40";
+          iconSpan.className = "w-5 h-5 rounded-full bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-mono text-[11px] shrink-0 font-bold";
+          iconSpan.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+        } else {
+          btn.className = "step-nav flex items-center space-x-2 py-2 px-3 rounded-control text-left transition text-muted hover:text-ink";
+          iconSpan.className = "w-5 h-5 rounded-full border border-line bg-paper text-muted flex items-center justify-center font-mono text-[11px] shrink-0";
+          iconSpan.innerHTML = `${stepNum}`;
+        }
+      });
+
+      // Update Mobile Stepper Labels
+      const stepNames = ["Receipt & Items", "Assign Items", "Fair Breakdown", "Settle Balances"];
+      document.getElementById("mobileStepBadge").textContent = targetStep;
+      document.getElementById("mobileStepLabel").textContent = `Step ${targetStep} of 4: ${stepNames[targetStep - 1]}`;
+      document.getElementById("mobilePrevBtn").disabled = (targetStep === 1);
+      document.getElementById("mobileNextBtn").disabled = (targetStep === 4);
+
+      // Hide / Show Step Panels
+      document.querySelectorAll(".step-panel").forEach(p => p.classList.add("hidden"));
+      const activePanel = document.getElementById(`step-panel-${targetStep}`);
+      if (activePanel) {
+        activePanel.classList.remove("hidden");
+      }
+
+      // Step-specific activations
+      if (targetStep === 2) {
+        renderMatrix();
+      } else if (targetStep === 4) {
+        fetchSettlementPlan();
+      }
+
+      updateLiveTicket();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function nextStep() {
+      if (state.step < 4) goToStep(state.step + 1);
+    }
+
+    function prevStep() {
+      if (state.step > 1) goToStep(state.step - 1);
+    }
+
+    // Initialize App
+    async function init() {
+      // Handle URL return parameters from PayPal Sandbox
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("payment") === "success") {
+        showToast("PayPal payment completed & verified!", "success");
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (params.get("payment") === "mock_success") {
+        showToast("Simulated payment approved and marked PAID.", "success");
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (params.get("payment") === "cancelled") {
+        showToast("PayPal transaction was cancelled.", "warning");
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+
+      try {
+        // Fetch config & currency
+        const cfgResp = await fetch(`${API_BASE}/api/config`);
+        const cfg = await cfgResp.json();
+        state.currency = cfg.currency || "USD";
+        state.currencySymbol = cfg.currency_symbol || "$";
+        state.mockAi = cfg.mock_ai;
+        state.mockPaypal = cfg.mock_paypal;
+
+        document.querySelectorAll(".currency-symbol").forEach(el => el.textContent = state.currencySymbol);
+        
+        if (state.mockAi) {
+          document.getElementById("badgeMockAi").classList.remove("hidden");
+        }
+        if (state.mockPaypal) {
+          document.getElementById("badgeMockPaypal").classList.remove("hidden");
+        }
+
+        // Fetch members
+        const memResp = await fetch(`${API_BASE}/api/members`);
+        state.members = await memResp.json();
+        populatePaidBySelect();
+
+        // Load initial demo bill
+        loadSampleBill();
+      } catch (err) {
+        console.error("Initialization error:", err);
+      }
+    }
+
+    function populatePaidBySelect() {
+      const select = document.getElementById("paidBySelect");
+      select.innerHTML = "";
+      state.members.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.id;
+        opt.textContent = m.name;
+        if (m.name.toLowerCase() === "karthik") opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    // -------------------------------------------------------------
+    // STEP 1: RECEIPT LOGIC
+    // -------------------------------------------------------------
+    function loadSampleBill() {
+      state.items = [
+        { id: 1, name: "Masala Dosa", price_minor: 10000, qty: 1 },
+        { id: 2, name: "Filter Coffee", price_minor: 6000, qty: 1 },
+        { id: 3, name: "Chicken Biryani", price_minor: 25000, qty: 1 },
+        { id: 4, name: "Lime Soda", price_minor: 6000, qty: 1 },
+        { id: 5, name: "Veg Fried Rice", price_minor: 18000, qty: 1 },
+        { id: 6, name: "Gobi Manchurian", price_minor: 15000, qty: 1 },
+        { id: 7, name: "Paneer Pizza", price_minor: 30000, qty: 1 },
+        { id: 8, name: "Cold Coffee", price_minor: 10000, qty: 1 },
+        { id: 9, name: "Gulab Jamun", price_minor: 10000, qty: 1 }
+      ];
+      state.tax_minor = 6500;
+      state.discount_minor = 0;
+      state.stated_total_minor = 136500;
+
+      state.assignments = {
+        1: ["Indhu"],
+        2: ["Indhu"],
+        3: ["Ravi"],
+        4: ["Ravi"],
+        5: ["Priya"],
+        6: ["Priya"],
+        7: ["Karthik"],
+        8: ["Karthik"],
+        9: ["Indhu", "Ravi", "Priya", "Karthik"]
+      };
+
+      document.getElementById("taxInput").value = (state.tax_minor / 100).toFixed(2);
+      document.getElementById("discountInput").value = (state.discount_minor / 100).toFixed(2);
+      document.getElementById("statedTotalInput").value = (state.stated_total_minor / 100).toFixed(2);
+      document.getElementById("expenseDescription").value = "South Indian Feast (Sample Receipt)";
+
+      renderItemsTable();
+      showToast("Loaded sample restaurant bill (₹1,365.00) with 5% GST.");
+    }
+
+    function renderItemsTable() {
+      const tbody = document.getElementById("itemsTableBody");
+      tbody.innerHTML = "";
+
+      let itemsSubtotal = 0;
+      state.items.forEach((item, index) => {
+        const lineMinor = item.price_minor * item.qty;
+        itemsSubtotal += lineMinor;
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-paper/30 transition";
+        tr.innerHTML = `
+          <td class="py-2.5 px-3">
+            <input type="text" value="${escapeHtml(item.name)}" onchange="updateItemName(${index}, this.value)" class="w-full text-xs p-1 bg-surface paper-border rounded font-medium focus:border-primary">
+          </td>
+          <td class="py-2.5 px-3">
+            <input type="number" step="0.01" value="${(item.price_minor / 100).toFixed(2)}" onchange="updateItemPrice(${index}, this.value)" class="w-full text-right text-xs font-mono tabular-nums p-1 bg-surface paper-border rounded focus:border-primary">
+          </td>
+          <td class="py-2.5 px-3">
+            <input type="number" min="1" value="${item.qty}" onchange="updateItemQty(${index}, this.value)" class="w-full text-center text-xs font-mono tabular-nums p-1 bg-surface paper-border rounded focus:border-primary">
+          </td>
+          <td class="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-ink">
+            ${formatMinor(lineMinor)}
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <button type="button" onclick="deleteItemRow(${index})" aria-label="Delete item" class="text-muted hover:text-danger p-1 rounded transition">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById("itemsCountBadge").textContent = state.items.length;
+      document.getElementById("tfootSubtotal").textContent = formatMinor(itemsSubtotal);
+
+      checkReceiptDiscrepancy();
+      updateLiveTicket();
+    }
+
+    function updateItemName(idx, val) {
+      state.items[idx].name = val.trim();
+      updateLiveTicket();
+    }
+
+    function updateItemPrice(idx, val) {
+      state.items[idx].price_minor = Math.round(parseFloat(val || 0) * 100);
+      renderItemsTable();
+    }
+
+    function updateItemQty(idx, val) {
+      state.items[idx].qty = Math.max(1, parseInt(val || 1));
+      renderItemsTable();
+    }
+
+    function deleteItemRow(idx) {
+      const removed = state.items.splice(idx, 1)[0];
+      if (removed && removed.id) {
+        delete state.assignments[removed.id];
+      }
+      renderItemsTable();
+    }
+
+    function addNewItemRow() {
+      const nextId = state.items.length > 0 ? Math.max(...state.items.map(i => Number(i.id) || 0)) + 1 : 1;
+      state.items.push({
+        id: nextId,
+        name: `New Item ${nextId}`,
+        price_minor: 1000,
+        qty: 1
+      });
+      renderItemsTable();
+    }
+
+    function onTaxOrDiscountChanged() {
+      state.tax_minor = Math.round(parseFloat(document.getElementById("taxInput").value || 0) * 100);
+      state.discount_minor = Math.round(parseFloat(document.getElementById("discountInput").value || 0) * 100);
+      checkReceiptDiscrepancy();
+      updateLiveTicket();
+    }
+
+    function onStatedTotalChanged() {
+      state.stated_total_minor = Math.round(parseFloat(document.getElementById("statedTotalInput").value || 0) * 100);
+      checkReceiptDiscrepancy();
+      updateLiveTicket();
+    }
+
+    function getCalculatedBillTotal() {
+      const itemsSum = state.items.reduce((sum, item) => sum + (item.price_minor * item.qty), 0);
+      return itemsSum + state.tax_minor - state.discount_minor;
+    }
+
+    function checkReceiptDiscrepancy() {
+      const calc = getCalculatedBillTotal();
+      const stated = state.stated_total_minor;
+      const banner = document.getElementById("receiptWarningsBanner");
+      const text = document.getElementById("receiptWarningsText");
+
+      if (calc !== stated) {
+        text.textContent = `Sum of items (${formatMoney(calc - state.tax_minor + state.discount_minor)}) + Tax (${formatMoney(state.tax_minor)}) - Discount (${formatMoney(state.discount_minor)}) equals ${formatMoney(calc)}, but stated bill total is ${formatMoney(stated)}.`;
+        banner.classList.remove("hidden");
+      } else {
+        banner.classList.add("hidden");
+      }
+    }
+
+    function autoAlignBillTotal() {
+      const calc = getCalculatedBillTotal();
+      state.stated_total_minor = calc;
+      document.getElementById("statedTotalInput").value = (calc / 100).toFixed(2);
+      checkReceiptDiscrepancy();
+      updateLiveTicket();
+      showToast("Stated bill total reconciled to match line items + tax.", "success");
+    }
+
+    // Receipt File Upload Handlers
+    function handleDragOver(e) {
+      e.preventDefault();
+      document.getElementById("dropZone").classList.add("border-primary", "bg-paper/70");
+    }
+
+    function handleDragLeave(e) {
+      e.preventDefault();
+      document.getElementById("dropZone").classList.remove("border-primary", "bg-paper/70");
+    }
+
+    function handleDrop(e) {
+      e.preventDefault();
+      document.getElementById("dropZone").classList.remove("border-primary", "bg-paper/70");
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        handleFileSelected(e.dataTransfer.files[0]);
+      }
+    }
+
+    async function handleFileSelected(file) {
+      if (!file) return;
+
+      // Show thumbnail
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        document.getElementById("thumbImg").src = e.target.result;
+        document.getElementById("thumbName").textContent = file.name;
+        document.getElementById("thumbSize").textContent = `${(file.size / 1024).toFixed(1)} KB`;
+        document.getElementById("dropZoneDefault").classList.add("hidden");
+        document.getElementById("dropZoneThumb").classList.remove("hidden");
+      };
+      reader.readAsDataURL(file);
+
+      // Trigger OCR upload
+      const loader = document.getElementById("ocrLoading");
+      loader.classList.remove("hidden");
+
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/receipt`, { method: "POST", body: formData });
+        const data = await resp.json();
+
+        state.items = (data.items || []).map((i, idx) => ({
+          id: i.id || idx + 1,
+          name: i.name,
+          price_minor: i.price_minor,
+          qty: i.qty || 1
+        }));
+        state.tax_minor = data.tax_minor || 0;
+        state.discount_minor = data.discount_minor || 0;
+        state.stated_total_minor = data.total_minor || 0;
+
+        document.getElementById("taxInput").value = (state.tax_minor / 100).toFixed(2);
+        document.getElementById("discountInput").value = (state.discount_minor / 100).toFixed(2);
+        document.getElementById("statedTotalInput").value = (state.stated_total_minor / 100).toFixed(2);
+
+        renderItemsTable();
+        showToast("Receipt extracted successfully with Gemini Vision!", "success");
+      } catch (err) {
+        showToast("Error parsing receipt image: " + err, "danger");
+      } finally {
+        loader.classList.add("hidden");
+      }
+    }
+
+    function removeReceiptImage() {
+      document.getElementById("receiptFileInput").value = "";
+      document.getElementById("dropZoneThumb").classList.add("hidden");
+      document.getElementById("dropZoneDefault").classList.remove("hidden");
+    }
+
+    // -------------------------------------------------------------
+    // STEP 2: ASSIGNMENT MATRIX & AI SENTENCE
+    // -------------------------------------------------------------
+    function renderMatrix() {
+      const thead = document.getElementById("matrixThead");
+      const tbody = document.getElementById("matrixTbody");
+      thead.innerHTML = "";
+      tbody.innerHTML = "";
+
+      // Render Matrix Header
+      const headerTr = document.createElement("tr");
+      headerTr.innerHTML = `
+        <th class="py-2.5 px-3 min-w-[140px]">Line Item</th>
+        <th class="py-2.5 px-3 w-20 text-right">Price</th>
+        <th class="py-2.5 px-3 w-16 text-center">All</th>
+      `;
+      state.members.forEach(m => {
+        const style = getAvatarStyle(m.name);
+        const th = document.createElement("th");
+        th.className = "py-2.5 px-2 text-center w-14";
+        th.innerHTML = `
+          <div class="flex flex-col items-center space-y-0.5">
+            <span class="inline-flex items-center justify-center font-bold text-[10px] rounded-full" style="width:22px;height:22px;background:${style.bg};color:${style.text};border:1px solid ${style.border};">
+              ${getInitials(m.name)}
+            </span>
+            <span class="text-[9px] font-medium text-ink truncate max-w-[50px]">${escapeHtml(m.name)}</span>
+          </div>
+        `;
+        headerTr.appendChild(th);
+      });
+      thead.appendChild(headerTr);
+
+      // Render Matrix Rows
+      state.items.forEach(item => {
+        const assigned = state.assignments[item.id] || [];
+        const isAll = state.members.length > 0 && state.members.every(m => assigned.includes(m.name));
+        const lineTotal = item.price_minor * item.qty;
+
+        const tr = document.createElement("tr");
+        tr.id = `matrix-row-${item.id}`;
+        tr.className = "hover:bg-paper/30 transition";
+
+        let html = `
+          <td class="py-2.5 px-3">
+            <div class="font-medium text-ink">${escapeHtml(item.name)}</div>
+            <div class="text-[10px] text-muted">
+              ${assigned.length === 0 ? '<span class="text-danger font-semibold">Unassigned</span>' : assigned.length === 1 ? `Only ${escapeHtml(assigned[0])}` : `Shared by ${assigned.length} people`}
+            </div>
+          </td>
+          <td class="py-2.5 px-3 text-right font-mono tabular-nums font-semibold text-ink">
+            ${formatMinor(lineTotal)}
+          </td>
+          <td class="py-2.5 px-3 text-center">
+            <button type="button" onclick="toggleSelectAllRow(${item.id}, ${!isAll})" class="text-[10px] font-semibold py-1 px-2 rounded-control border ${isAll ? 'bg-primary text-surface border-primary' : 'bg-surface text-muted border-line hover:text-ink'} transition">
+              ${isAll ? 'All' : 'All'}
+            </button>
+          </td>
+        `;
+
+        state.members.forEach(m => {
+          const isSelected = assigned.includes(m.name);
+          const style = getAvatarStyle(m.name);
+          html += `
+            <td class="py-2.5 px-2 text-center">
+              <button type="button" 
+                      role="button" 
+                      aria-pressed="${isSelected}" 
+                      onclick="toggleMemberAssignment(${item.id}, '${escapeHtml(m.name)}')" 
+                      class="w-8 h-8 rounded-control font-mono font-bold text-xs inline-flex items-center justify-center transition"
+                      style="${isSelected 
+                        ? `background:${style.bg};color:${style.text};border:1.5px solid ${style.border};box-shadow:0 1px 2px rgba(0,0,0,0.05);` 
+                        : `background:transparent;color:#A0A69D;border:1px solid #E3DBC9;`}">
+                ${getInitials(m.name)}
+              </button>
+            </td>
+          `;
+        });
+
+        tr.innerHTML = html;
+        tbody.appendChild(tr);
+      });
+
+      validateAssignments(false);
+      updateLiveTicket();
+    }
+
+    function toggleMemberAssignment(itemId, memberName) {
+      if (!state.assignments[itemId]) state.assignments[itemId] = [];
+      const idx = state.assignments[itemId].indexOf(memberName);
+      if (idx > -1) {
+        state.assignments[itemId].splice(idx, 1);
+      } else {
+        state.assignments[itemId].push(memberName);
+      }
+      renderMatrix();
+    }
+
+    function toggleSelectAllRow(itemId, shouldSelectAll) {
+      if (shouldSelectAll) {
+        state.assignments[itemId] = state.members.map(m => m.name);
+      } else {
+        state.assignments[itemId] = [];
+      }
+      renderMatrix();
+    }
+
+    function validateAssignments(showWarning = true) {
+      let unassignedCount = 0;
+      state.items.forEach(item => {
+        const assigned = state.assignments[item.id] || [];
+        const row = document.getElementById(`matrix-row-${item.id}`);
+        if (assigned.length === 0) {
+          unassignedCount++;
+          if (row && showWarning) {
+            row.classList.add("bg-danger/5");
+          }
+        } else if (row) {
+          row.classList.remove("bg-danger/5");
+        }
+      });
+
+      const warningEl = document.getElementById("unassignedWarning");
+      if (unassignedCount > 0 && showWarning) {
+        warningEl.classList.remove("hidden");
+        document.getElementById("unassignedWarningText").textContent = `${unassignedCount} item(s) are currently unassigned. Tag every item to at least one person.`;
+        return false;
+      } else {
+        warningEl.classList.add("hidden");
+        return unassignedCount === 0;
+      }
+    }
+
+    function fillExampleSentence() {
+      document.getElementById("aiSentenceInput").value = "Indhu had dosa and coffee, Ravi had biryani and soda, Priya had fried rice and gobi, Karthik had pizza and cold coffee, everyone shared gulab jamun";
+    }
+
+    async function submitAiSentence() {
+      const text = document.getElementById("aiSentenceInput").value.trim();
+      if (!text) {
+        showToast("Please enter a sentence describing the group's orders.", "warning");
+        return;
+      }
+
+      const btn = document.getElementById("aiParseBtn");
+      btn.disabled = true;
+      btn.innerHTML = `<span class="animate-pulse">Parsing...</span>`;
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/parse-assignment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: state.items,
+            members: state.members.map(m => m.name),
+            text: text
+          })
+        });
+        const data = await resp.json();
+
+        if (data.assignments && Array.isArray(data.assignments)) {
+          state.assignments = {};
+          data.assignments.forEach(a => {
+            state.assignments[a.item_id] = a.people || [];
+          });
+          renderMatrix();
+          
+          // Flash animation
+          document.querySelectorAll("#matrixTbody tr").forEach(tr => {
+            tr.classList.add("ai-highlight");
+            setTimeout(() => tr.classList.remove("ai-highlight"), 1000);
+          });
+
+          showToast("AI parsed the sentence and mapped items!", "success");
+        }
+      } catch (err) {
+        showToast("AI assignment failed: " + err, "danger");
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+          <span>Assign with AI</span>
+        `;
+      }
+    }
+
+    // -------------------------------------------------------------
+    // STEP 3: SAVE EXPENSE & BREAKDOWN
+    // -------------------------------------------------------------
+    async function saveAndCalculateSplit() {
+      if (!validateAssignments(true)) {
+        showToast("Please assign all items before proceeding.", "warning");
+        return;
+      }
+
+      const saveBtn = document.getElementById("saveExpenseBtn");
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = `<span>Computing Fair Split...</span>`;
+
+      const paidByVal = document.getElementById("paidBySelect").value;
+      const desc = document.getElementById("expenseDescription").value.trim() || "Restaurant Bill";
+
+      const payload = {
+        description: desc,
+        paid_by: parseInt(paidByVal),
+        items: state.items,
+        assignments: Object.entries(state.assignments).map(([itemId, people]) => ({
+          item_id: itemId,
+          people: people
+        })),
+        tax_minor: state.tax_minor,
+        discount_minor: state.discount_minor
+      };
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/expenses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.detail || "Error saving expense");
+        }
+
+        const data = await resp.json();
+        state.lastBreakdown = data;
+
+        renderBreakdown(data);
+        goToStep(3);
+        showToast("Expense computed and recorded in ledger!", "success");
+      } catch (err) {
+        showToast("Split error: " + err.message, "danger");
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = `
+          <span>Save Expense & Compute Split</span>
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+        `;
+      }
+    }
+
+    function renderBreakdown(data) {
+      const container = document.getElementById("breakdownCardsContainer");
+      container.innerHTML = "";
+
+      let sharesTotal = 0;
+      const breakdown = data.breakdown || {};
+
+      Object.values(breakdown).forEach(person => {
+        sharesTotal += person.total_minor;
+        const style = getAvatarStyle(person.name);
+
+        const card = document.createElement("div");
+        card.className = "bg-surface rounded-panel paper-border p-5 space-y-3 shadow-soft hover:border-primary/40 transition";
+        
+        let ownItemsHtml = person.own_items.length > 0 
+          ? person.own_items.map(i => `
+              <div class="flex justify-between py-1 text-ink">
+                <span>${escapeHtml(i.name)} ${i.qty > 1 ? `<span class="text-muted">(×${i.qty})</span>` : ''}</span>
+                <span class="font-mono tabular-nums text-muted">${formatMinor(i.total_minor)}</span>
+              </div>
+            `).join("")
+          : `<p class="text-muted text-[11px] italic py-0.5">No individual items</p>`;
+
+        let sharedItemsHtml = person.shared_items.length > 0
+          ? person.shared_items.map(i => `
+              <div class="flex justify-between py-1 text-ink">
+                <span>${escapeHtml(i.name)} <span class="text-[10px] text-muted font-mono">(1/${i.people_count})</span></span>
+                <span class="font-mono tabular-nums text-muted">${formatMinor(i.share_minor)}</span>
+              </div>
+            `).join("")
+          : `<p class="text-muted text-[11px] italic py-0.5">No shared items</p>`;
+
+        card.innerHTML = `
+          <div class="flex items-center justify-between border-b border-line pb-3">
+            <div class="flex items-center space-x-2.5">
+              <span class="inline-flex items-center justify-center font-bold text-xs rounded-full" style="width:30px;height:30px;background:${style.bg};color:${style.text};border:1px solid ${style.border};">
+                ${getInitials(person.name)}
+              </span>
+              <div>
+                <h4 class="font-bold text-sm text-ink">${escapeHtml(person.name)}</h4>
+                <span class="text-[10px] text-muted font-mono">Subtotal: ${formatMoney(person.subtotal_minor)}</span>
+              </div>
+            </div>
+            <div class="text-right">
+              <span class="font-display font-bold text-lg text-primary font-mono tabular-nums block">${formatMoney(person.total_minor)}</span>
+            </div>
+          </div>
+
+          <!-- Expandable Details Accordion -->
+          <details class="group text-xs">
+            <summary class="cursor-pointer list-none flex items-center justify-between text-muted hover:text-ink font-semibold py-1">
+              <span>View Detailed Line Items</span>
+              <svg class="w-3.5 h-3.5 transform group-open:rotate-180 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+            </summary>
+            
+            <div class="pt-2.5 space-y-2 border-t border-line mt-1">
+              <div>
+                <span class="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Individual Items</span>
+                <div class="divide-y divide-line/60">${ownItemsHtml}</div>
+              </div>
+
+              <div>
+                <span class="text-[10px] font-bold text-muted uppercase tracking-wider block mb-1">Shared Fractions</span>
+                <div class="divide-y divide-line/60">${sharedItemsHtml}</div>
+              </div>
+
+              <div class="pt-1.5 border-t border-line flex justify-between font-medium text-muted">
+                <span>Tax & GST Portion:</span>
+                <span class="font-mono tabular-nums text-ink">+${formatMoney(person.tax_part_minor)}</span>
+              </div>
+            </div>
+          </details>
+        `;
+        container.appendChild(card);
+      });
+
+      // Update Verification Banner
+      const isExact = (sharesTotal === data.total_minor);
+      const banner = document.getElementById("breakdownCheckBanner");
+      const icon = document.getElementById("breakdownCheckIcon");
+      const title = document.getElementById("breakdownCheckTitle");
+      const desc = document.getElementById("breakdownCheckDesc");
+
+      if (isExact) {
+        banner.className = "mt-6 p-4 rounded-panel paper-border flex items-center justify-between bg-success/10 border-success/30";
+        icon.className = "w-6 h-6 rounded-full bg-success text-surface flex items-center justify-center font-bold text-xs shrink-0";
+        icon.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>`;
+        title.textContent = "Sum of Shares = Stated Bill Total";
+        desc.textContent = `Sum of member shares (${formatMoney(sharesTotal)}) matches total bill (${formatMoney(data.total_minor)}) down to 0 paise/cents.`;
+      } else {
+        banner.className = "mt-6 p-4 rounded-panel paper-border flex items-center justify-between bg-danger/10 border-danger/30";
+        icon.className = "w-6 h-6 rounded-full bg-danger text-surface flex items-center justify-center font-bold text-xs shrink-0";
+        icon.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>`;
+        title.textContent = "Discrepancy in Shares Sum";
+        desc.textContent = `Sum of shares (${formatMoney(sharesTotal)}) does not match bill total (${formatMoney(data.total_minor)}).`;
+      }
+    }
+
+    // -------------------------------------------------------------
+    // STEP 4: SETTLEMENT & PAYPAL TRACKING
+    // -------------------------------------------------------------
+    async function fetchSettlementPlan(manualRefresh = false) {
+      try {
+        const resp = await fetch(`${API_BASE}/api/settlement-plan`);
+        const data = await resp.json();
+        state.settlementPlan = data;
+
+        // Render Optimizer Comparison Numbers
+        animateCountUp("transfersCountBefore", data.before_count || 0);
+        animateCountUp("transfersCountAfter", data.after_count || 0);
+
+        // Render Balances Grid
+        renderBalancesGrid(data.net_balances || {});
+
+        // Render Transfers
+        renderTransfersList(data.transfers || []);
+
+        // Manage Polling
+        managePaymentPolling(data.transfers || []);
+
+        if (manualRefresh) {
+          showToast("Settlement plan and payment statuses refreshed.", "success");
+        }
+      } catch (err) {
+        showToast("Error retrieving settlement plan: " + err, "danger");
+      }
+    }
+
+    function renderBalancesGrid(netBalances) {
+      const grid = document.getElementById("balancesGrid");
+      grid.innerHTML = "";
+
+      Object.entries(netBalances).forEach(([name, bal]) => {
+        const style = getAvatarStyle(name);
+        const isCreditor = bal > 0;
+        const isDebtor = bal < 0;
+
+        const el = document.createElement("div");
+        el.className = `p-3 rounded-control paper-border bg-surface text-center space-y-1 ${
+          isCreditor ? 'border-success/40' : isDebtor ? 'border-danger/40' : ''
+        }`;
+
+        el.innerHTML = `
+          <div class="flex items-center justify-center space-x-1">
+            <span class="inline-flex items-center justify-center font-bold text-[9px] rounded-full" style="width:16px;height:16px;background:${style.bg};color:${style.text};border:1px solid ${style.border};">
+              ${getInitials(name)}
+            </span>
+            <span class="text-xs font-semibold text-ink">${escapeHtml(name)}</span>
+          </div>
+          <div class="font-mono tabular-nums font-bold text-xs ${isCreditor ? 'text-success' : isDebtor ? 'text-danger' : 'text-muted'}">
+            ${isCreditor ? '+' : ''}${formatMoney(bal)}
+          </div>
+          <div class="text-[9px] uppercase tracking-wider font-semibold ${isCreditor ? 'text-success' : isDebtor ? 'text-danger' : 'text-muted'}">
+            ${isCreditor ? 'Receives' : isDebtor ? 'Owes' : 'Settled'}
+          </div>
+        `;
+        grid.appendChild(el);
+      });
+    }
+
+    function renderTransfersList(transfers) {
+      const container = document.getElementById("transfersContainer");
+      container.innerHTML = "";
+
+      if (transfers.length === 0) {
+        container.innerHTML = `
+          <div class="p-6 text-center rounded-control paper-border bg-paper/30 text-muted text-xs">
+            All accounts are settled. No transfers required!
+          </div>
+        `;
+        return;
+      }
+
+      transfers.forEach(t => {
+        const fromStyle = getAvatarStyle(t.from);
+        const toStyle = getAvatarStyle(t.to);
+        const isPaid = (t.status === "paid");
+        const hasOrder = !!t.approve_url;
+
+        const card = document.createElement("div");
+        card.className = `p-4 rounded-control paper-border bg-surface shadow-soft flex flex-col md:flex-row md:items-center justify-between gap-3 transition ${
+          isPaid ? 'border-success/30 bg-success/5' : ''
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center space-x-3">
+            <!-- Avatar Flow -->
+            <div class="flex items-center space-x-1 shrink-0">
+              <span class="inline-flex items-center justify-center font-bold text-[10px] rounded-full" style="width:26px;height:26px;background:${fromStyle.bg};color:${fromStyle.text};border:1px solid ${fromStyle.border};">
+                ${getInitials(t.from)}
+              </span>
+              <svg class="w-3.5 h-3.5 text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
+              <span class="inline-flex items-center justify-center font-bold text-[10px] rounded-full" style="width:26px;height:26px;background:${toStyle.bg};color:${toStyle.text};border:1px solid ${toStyle.border};">
+                ${getInitials(t.to)}
+              </span>
+            </div>
+
+            <div>
+              <div class="flex items-center space-x-2">
+                <span class="font-bold text-xs text-ink">${escapeHtml(t.from)}</span>
+                <span class="text-muted text-[11px]">pays</span>
+                <span class="font-bold text-xs text-ink">${escapeHtml(t.to)}</span>
+              </div>
+              <div class="flex items-center space-x-2 mt-0.5">
+                <span class="font-mono tabular-nums font-bold text-xs text-primary">${formatMoney(t.amount_minor)}</span>
+                <span class="inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold ${
+                  isPaid ? 'bg-success/15 text-success border border-success/30' : 'bg-warning/15 text-warning border border-warning/30'
+                }">
+                  <span class="w-1 h-1 rounded-full ${isPaid ? 'bg-success' : 'bg-warning'}"></span>
+                  <span>${isPaid ? 'Paid' : 'Pending'}</span>
+                </span>
+                ${t.paypal_order_id ? `<span class="text-[9px] font-mono text-muted hidden sm:inline">#${escapeHtml(t.paypal_order_id)}</span>` : ''}
+              </div>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex items-center space-x-2 justify-end pt-2 md:pt-0 border-t md:border-t-0 border-line/60">
+            ${isPaid ? `
+              <span class="px-3 py-1.5 bg-success/10 text-success border border-success/20 text-xs font-semibold rounded-control flex items-center space-x-1">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                <span>Settled</span>
+              </span>
+            ` : hasOrder ? `
+              <a href="${t.approve_url ? (t.approve_url.startsWith('http') ? t.approve_url : `${API_BASE}${t.approve_url}`) : '#'}" target="_blank" rel="noopener noreferrer" class="px-3.5 py-1.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>
+                <span>Open Link</span>
+              </a>
+              <button type="button" onclick="refreshSinglePayment(${t.payment_id})" aria-label="Refresh payment" class="p-1.5 text-muted hover:text-ink border border-line rounded-control hover:bg-paper transition" title="Refresh Status">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+              </button>
+            ` : `
+              <button type="button" onclick="createPaymentOrder('${escapeHtml(t.from)}', '${escapeHtml(t.to)}', ${t.amount_minor})" class="px-3.5 py-1.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1.5">
+                <span>Create PayPal Link</span>
+              </button>
+            `}
+
+            <button type="button" onclick="openReminder('${escapeHtml(t.from)}', '${escapeHtml(t.to)}', ${t.amount_minor}, ${t.payment_id || 'null'})" class="px-3 py-1.5 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition flex items-center space-x-1">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+              <span>Remind</span>
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    async function createPaymentOrder(fromName, toName, amountMinor) {
+      try {
+        const resp = await fetch(`${API_BASE}/api/payments/create`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ from: fromName, to: toName, amount_minor: amountMinor })
+        });
+        const data = await resp.json();
+        showToast(`PayPal checkout link generated for ${fromName}.`, "success");
+        fetchSettlementPlan(false);
+      } catch (err) {
+        showToast("Error creating PayPal order: " + err, "danger");
+      }
+    }
+
+    async function refreshSinglePayment(paymentId) {
+      if (!paymentId) return;
+      try {
+        const resp = await fetch(`${API_BASE}/api/payments/${paymentId}/refresh`, { method: "POST" });
+        const data = await resp.json();
+        showToast(`Payment #${paymentId} is ${data.status.toUpperCase()}`, "info");
+        fetchSettlementPlan(false);
+      } catch (err) {
+        showToast("Refresh error: " + err, "danger");
+      }
+    }
+
+    // Polling Management: poll every 5s if any transfer is pending
+    function managePaymentPolling(transfers) {
+      const hasPending = transfers.some(t => t.status !== "paid");
+      const indicator = document.getElementById("pollingStatusIndicator");
+
+      if (hasPending) {
+        indicator.textContent = "Live tracking active (polling every 5s)";
+        indicator.className = "text-[11px] text-primary font-mono";
+        if (!state.pollingTimer) {
+          state.pollingTimer = setInterval(() => {
+            if (state.step === 4) {
+              fetchSettlementPlan(false);
+            }
+          }, 5000);
+        }
+      } else {
+        indicator.textContent = "All payments settled";
+        indicator.className = "text-[11px] text-success font-mono";
+        if (state.pollingTimer) {
+          clearInterval(state.pollingTimer);
+          state.pollingTimer = null;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // REMINDER MODAL LOGIC
+    // -------------------------------------------------------------
+    function openReminder(fromName, toName, amountMinor, paymentId) {
+      state.activeReminderPayment = { fromName, toName, amountMinor, paymentId };
+      document.getElementById("reminderModal").classList.remove("hidden");
+      generateReminderMessage();
+    }
+
+    function closeReminderModal() {
+      document.getElementById("reminderModal").classList.add("hidden");
+    }
+
+    function setTone(tone) {
+      state.reminderTone = tone;
+      document.querySelectorAll(".tone-btn").forEach(btn => {
+        btn.className = "tone-btn py-1.5 px-3 text-xs font-semibold rounded-control border border-line bg-surface text-muted hover:text-ink transition";
+      });
+      const active = document.getElementById(`tone-${tone}`);
+      if (active) {
+        active.className = "tone-btn py-1.5 px-3 text-xs font-semibold rounded-control border border-primary bg-primary/10 text-primary transition";
+      }
+      generateReminderMessage();
+    }
+
+    async function generateReminderMessage() {
+      if (!state.activeReminderPayment) return;
+      const spinner = document.getElementById("reminderSpinner");
+      spinner.classList.remove("hidden");
+
+      try {
+        const payload = {
+          from_name: state.activeReminderPayment.fromName,
+          to_name: state.activeReminderPayment.toName,
+          amount_minor: state.activeReminderPayment.amountMinor,
+          payment_id: state.activeReminderPayment.paymentId,
+          tone: state.reminderTone
+        };
+        const resp = await fetch(`${API_BASE}/api/reminder`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        
+        document.getElementById("reminderText").value = data.message || data.reminder || "";
+        const mockTag = document.getElementById("reminderMockTag");
+        if (data.is_mock) {
+          mockTag.classList.remove("hidden");
+        } else {
+          mockTag.classList.add("hidden");
+        }
+      } catch (err) {
+        document.getElementById("reminderText").value = `Hi ${state.activeReminderPayment.fromName}, please settle your share of ${formatMoney(state.activeReminderPayment.amountMinor)} with ${state.activeReminderPayment.toName}!`;
+      } finally {
+        spinner.classList.add("hidden");
+      }
+    }
+
+    function copyReminderText() {
+      const text = document.getElementById("reminderText").value;
+      navigator.clipboard.writeText(text);
+      const label = document.getElementById("copyBtnLabel");
+      label.textContent = "Copied!";
+      setTimeout(() => label.textContent = "Copy Message", 2000);
+      showToast("Reminder message copied to clipboard.", "success");
+    }
+
+    // -------------------------------------------------------------
+    // LIVE RECEIPT TICKET (Desktop & Mobile)
+    // -------------------------------------------------------------
+    function updateLiveTicket() {
+      const title = document.getElementById("expenseDescription").value.trim() || "Current Bill";
+      document.getElementById("ticketExpenseTitle").textContent = title;
+
+      // Calculate approximate live shares per person based on current assignments
+      const memberSubtotals = {};
+      state.members.forEach(m => memberSubtotals[m.name] = 0);
+
+      let itemsTotalMinor = 0;
+      state.items.forEach(item => {
+        const lineMinor = item.price_minor * item.qty;
+        itemsTotalMinor += lineMinor;
+        const assigned = state.assignments[item.id] || [];
+        const valid = assigned.filter(name => state.members.some(m => m.name === name));
+        if (valid.length > 0) {
+          const part = lineMinor / valid.length;
+          valid.forEach(p => memberSubtotals[p] += part);
+        }
+      });
+
+      const totalBill = itemsTotalMinor + state.tax_minor - state.discount_minor;
+      const totalSubtotal = Object.values(memberSubtotals).reduce((a, b) => a + b, 0);
+
+      // Render Desktop Ticket Member List
+      const desktopList = document.getElementById("ticketMembersList");
+      const mobileList = document.getElementById("mobileDrawerMembersList");
+      desktopList.innerHTML = "";
+      mobileList.innerHTML = "";
+
+      state.members.forEach(m => {
+        const rawSubtotal = memberSubtotals[m.name] || 0;
+        let estTotal = 0;
+        if (totalSubtotal > 0) {
+          estTotal = rawSubtotal * (totalBill / totalSubtotal);
+        }
+
+        const style = getAvatarStyle(m.name);
+        const itemHtml = `
+          <div class="flex items-center justify-between py-0.5">
+            <div class="flex items-center space-x-1.5 min-w-0">
+              <span class="inline-flex items-center justify-center font-bold text-[9px] rounded-full shrink-0" style="width:18px;height:18px;background:${style.bg};color:${style.text};border:1px solid ${style.border};">
+                ${getInitials(m.name)}
+              </span>
+              <span class="text-xs text-ink truncate">${escapeHtml(m.name)}</span>
+            </div>
+            <span class="font-mono tabular-nums text-xs font-semibold text-ink">${formatMoney(Math.round(estTotal))}</span>
+          </div>
+        `;
+        desktopList.insertAdjacentHTML("beforeend", itemHtml);
+        mobileList.insertAdjacentHTML("beforeend", itemHtml);
+      });
+
+      // Update Subtotals & Totals
+      document.getElementById("ticketSubtotal").textContent = formatMoney(itemsTotalMinor);
+      document.getElementById("ticketTax").textContent = `+${formatMoney(state.tax_minor)}`;
+      document.getElementById("ticketDiscount").textContent = `-${formatMoney(state.discount_minor)}`;
+      document.getElementById("ticketTotal").textContent = formatMoney(totalBill);
+
+      document.getElementById("mobileDrawerSubtotal").textContent = formatMoney(itemsTotalMinor);
+      document.getElementById("mobileDrawerTax").textContent = `+${formatMoney(state.tax_minor)}`;
+      document.getElementById("mobileDrawerDiscount").textContent = `-${formatMoney(state.discount_minor)}`;
+      document.getElementById("mobileBottomTotal").textContent = formatMoney(totalBill);
+
+      // Live Badge
+      const isBalanced = (getCalculatedBillTotal() === state.stated_total_minor);
+      const deskBadge = document.getElementById("ticketVerificationBadge");
+      const mobBadge = document.getElementById("mobileBottomBadge");
+
+      if (isBalanced) {
+        deskBadge.className = "p-2 rounded-control text-xs flex items-center justify-between border border-success/30 bg-success/10 text-success font-medium";
+        deskBadge.innerHTML = `
+          <div class="flex items-center space-x-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            <span>Sum = bill total</span>
+          </div>
+          <span class="font-mono text-[10px]">Exact</span>
+        `;
+        mobBadge.className = "text-[11px] font-mono px-2 py-0.5 rounded border border-success/30 bg-success/10 text-success";
+        mobBadge.textContent = "Exact Sum ✓";
+      } else {
+        deskBadge.className = "p-2 rounded-control text-xs flex items-center justify-between border border-warning/30 bg-warning/10 text-warning font-medium";
+        deskBadge.innerHTML = `
+          <div class="flex items-center space-x-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span>Mismatch</span>
+          </div>
+          <span class="font-mono text-[10px]">Review</span>
+        `;
+        mobBadge.className = "text-[11px] font-mono px-2 py-0.5 rounded border border-warning/30 bg-warning/10 text-warning";
+        mobBadge.textContent = "Mismatch ⚠️";
+      }
+    }
+
+    function toggleMobileTicketDrawer() {
+      state.mobileDrawerOpen = !state.mobileDrawerOpen;
+      const drawer = document.getElementById("mobileTicketDrawer");
+      const chevron = document.getElementById("mobileTicketChevron");
+      const label = document.getElementById("mobileTicketBtnLabel");
+
+      if (state.mobileDrawerOpen) {
+        drawer.classList.remove("hidden");
+        chevron.classList.add("rotate-180");
+        label.textContent = "Hide Ticket";
+      } else {
+        drawer.classList.add("hidden");
+        chevron.classList.remove("rotate-180");
+        label.textContent = "View Ticket";
+      }
+    }
+
+    // Number count-up utility
+    function animateCountUp(elementId, targetNumber) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const start = parseInt(el.textContent) || 0;
+      if (start === targetNumber) return;
+
+      const duration = 250;
+      const startTime = performance.now();
+
+      function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const current = Math.round(start + (targetNumber - start) * progress);
+        el.textContent = current;
+        if (progress < 1) {
+          requestAnimationFrame(update);
+        }
+      }
+      requestAnimationFrame(update);
+    }
+
+    // New Expense & Reset Actions
+    function startNewExpense() {
+      state.items = [];
+      state.assignments = {};
+      state.tax_minor = 0;
+      state.discount_minor = 0;
+      state.stated_total_minor = 0;
+      document.getElementById("expenseDescription").value = "New Expense";
+      document.getElementById("taxInput").value = "0.00";
+      document.getElementById("discountInput").value = "0.00";
+      document.getElementById("statedTotalInput").value = "0.00";
+      removeReceiptImage();
+      renderItemsTable();
+      goToStep(1);
+      showToast("Ready for new expense. Existing balances in the ledger are preserved.", "info");
+    }
+
+    function promptResetDemo() {
+      openConfirmModal(
+        "Reset All Ledger Data?",
+        "Are you sure you want to clear all recorded expenses and payment transactions? This action will restore the database to its pristine demo state.",
+        async () => {
+          try {
+            await fetch(`${API_BASE}/api/reset`, { method: "POST" });
+            loadSampleBill();
+            goToStep(1);
+            showToast("Demo data successfully reset.", "success");
+          } catch (err) {
+            showToast("Reset failed: " + err, "danger");
+          }
+        }
+      );
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    window.addEventListener("DOMContentLoaded", init);
+  </script>
+</body>
+</html>

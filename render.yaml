@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: splitsmart-ai
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash
+      - key: PAYPAL_CURRENCY
+        value: USD
+      - key: MOCK_AI
+        value: false
+      - key: MOCK_PAYPAL
+        value: false
+      - key: FRONTEND_URL
+        sync: false
