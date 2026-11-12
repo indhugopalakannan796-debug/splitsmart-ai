@@ -400,7 +400,7 @@ async def paypal_return(token: Optional[str] = None):
                 db.update_payment_by_order_id(token, "paid")
 
     frontend = get_frontend_redirect_url()
-    redirect_target = f"{frontend}/?payment=success" if frontend else "/?payment=success"
+    redirect_target = f"{frontend}/?step=settle&paid=1" if frontend else "/?step=settle&paid=1"
     return RedirectResponse(url=redirect_target, status_code=303)
 
 
@@ -448,7 +448,7 @@ async def mock_pay_page(payment_id: int):
     amount_fmt = f"{payment['amount_minor'] / 100:.2f}"
 
     frontend = get_frontend_redirect_url()
-    back_url = f"{frontend}/" if frontend else "/"
+    back_url = f"{frontend}/?step=settle" if frontend else "/?step=settle"
 
     html = f"""
     <!DOCTYPE html>
@@ -522,7 +522,7 @@ async def confirm_mock_payment(payment_id: int):
         raise HTTPException(status_code=404, detail="Payment not found")
     db.update_payment(payment_id, status="paid")
     frontend = get_frontend_redirect_url()
-    redirect_target = f"{frontend}/?payment=mock_success" if frontend else "/?payment=mock_success"
+    redirect_target = f"{frontend}/?step=settle&paid=1" if frontend else "/?step=settle&paid=1"
     return RedirectResponse(url=redirect_target, status_code=303)
 
 

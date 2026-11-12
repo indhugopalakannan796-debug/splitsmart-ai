@@ -773,11 +773,7 @@
   <!-- VANILLA JAVASCRIPT APPLICATION CORE -->
   <!-- =========================================================== -->
   <script>
-    // Split deployment configuration (Frontend on Netlify, Backend on Render)
-    if (!window.API_BASE && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      window.API_BASE = window.location.origin;
-    }
-   const API_BASE = window.API_BASE || "";
+    const API_BASE = "";
 
     // Earthy Muted Deterministic Palette for Avatars
     const AVATAR_PALETTE = [
@@ -896,6 +892,85 @@
       state.modalCallback = null;
     }
 
+    // -------------------------------------------------------------
+    // SESSION PERSISTENCE (Step & Expense Draft)
+    // -------------------------------------------------------------
+    function saveSessionState() {
+      try {
+        sessionStorage.setItem('splitsmart_step', String(state.step));
+        const descEl = document.getElementById("expenseDescription");
+        const paidEl = document.getElementById("paidBySelect");
+        const draft = {
+          description: descEl ? descEl.value : "",
+          items: state.items || [],
+          tax_minor: state.tax_minor || 0,
+          discount_minor: state.discount_minor || 0,
+          stated_total_minor: state.stated_total_minor || 0,
+          assignments: state.assignments || {},
+          paid_by: paidEl ? paidEl.value : null,
+          lastBreakdown: state.lastBreakdown || null
+        };
+        sessionStorage.setItem('splitsmart_draft', JSON.stringify(draft));
+      } catch (e) {
+        console.warn("Could not save to sessionStorage:", e);
+      }
+    }
+
+    function restoreSessionDraft() {
+      try {
+        const raw = sessionStorage.getItem('splitsmart_draft');
+        if (!raw) return false;
+        const draft = JSON.parse(raw);
+        if (!draft || typeof draft !== 'object') return false;
+
+        if (Array.isArray(draft.items) && draft.items.length > 0) {
+          state.items = draft.items;
+          state.tax_minor = Number(draft.tax_minor) || 0;
+          state.discount_minor = Number(draft.discount_minor) || 0;
+          state.stated_total_minor = Number(draft.stated_total_minor) || 0;
+          state.assignments = draft.assignments || {};
+          state.lastBreakdown = draft.lastBreakdown || null;
+
+          const descEl = document.getElementById("expenseDescription");
+          if (descEl && draft.description) descEl.value = draft.description;
+
+          const taxEl = document.getElementById("taxInput");
+          if (taxEl) taxEl.value = (state.tax_minor / 100).toFixed(2);
+
+          const discEl = document.getElementById("discountInput");
+          if (discEl) discEl.value = (state.discount_minor / 100).toFixed(2);
+
+          const totalEl = document.getElementById("statedTotalInput");
+          if (totalEl) totalEl.value = (state.stated_total_minor / 100).toFixed(2);
+
+          const paidEl = document.getElementById("paidBySelect");
+          if (paidEl && draft.paid_by) paidEl.value = draft.paid_by;
+
+          renderItemsTable();
+          if (state.lastBreakdown) {
+            renderBreakdown(state.lastBreakdown);
+          }
+          return true;
+        }
+      } catch (e) {
+        console.warn("Could not restore from sessionStorage:", e);
+      }
+      return false;
+    }
+
+    function getStoredStep() {
+      try {
+        const s = sessionStorage.getItem('splitsmart_step');
+        if (s) {
+          const num = parseInt(s, 10);
+          if (num >= 1 && num <= 4) return num;
+        }
+      } catch (e) {
+        console.warn("Could not read stored step:", e);
+      }
+      return null;
+    }
+
     // Navigation and Stepper
     function goToStep(targetStep) {
       // Validate step 2 progression
@@ -904,6 +979,7 @@
       }
 
       state.step = targetStep;
+      saveSessionState();
 
       // Update Desktop Stepper
       document.querySelectorAll(".step-nav").forEach((btn, idx) => {
@@ -943,6 +1019,10 @@
       // Step-specific activations
       if (targetStep === 2) {
         renderMatrix();
+      } else if (targetStep === 3) {
+        if (state.lastBreakdown) {
+          renderBreakdown(state.lastBreakdown);
+        }
       } else if (targetStep === 4) {
         fetchSettlementPlan();
       }
@@ -961,18 +1041,11 @@
 
     // Initialize App
     async function init() {
-      // Handle URL return parameters from PayPal Sandbox
+      // Handle URL return parameters from PayPal Sandbox / redirects
       const params = new URLSearchParams(window.location.search);
-      if (params.get("payment") === "success") {
-        showToast("PayPal payment completed & verified!", "success");
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (params.get("payment") === "mock_success") {
-        showToast("Simulated payment approved and marked PAID.", "success");
-        window.history.replaceState({}, document.title, window.location.pathname);
-      } else if (params.get("payment") === "cancelled") {
-        showToast("PayPal transaction was cancelled.", "warning");
-        window.history.replaceState({}, document.title, window.location.pathname);
-      }
+      const isSettleParam = (params.get("step") === "settle");
+      const isPaidParam = (params.get("paid") === "1" || params.get("payment") === "success" || params.get("payment") === "mock_success");
+      const isCancelledParam = (params.get("payment") === "cancelled");
 
       try {
         // Fetch config & currency
@@ -997,8 +1070,67 @@
         state.members = await memResp.json();
         populatePaidBySelect();
 
-        // Load initial demo bill
-        loadSampleBill();
+        // Listen for metadata changes to keep draft in sync
+        const descInput = document.getElementById("expenseDescription");
+        if (descInput) {
+          descInput.addEventListener("input", () => {
+            updateLiveTicket();
+            saveSessionState();
+          });
+        }
+        const paidSelect = document.getElementById("paidBySelect");
+        if (paidSelect) {
+          paidSelect.addEventListener("change", () => {
+            saveSessionState();
+          });
+        }
+
+        // Restore draft from sessionStorage if present, or load sample bill
+        const restored = restoreSessionDraft();
+        if (!restored) {
+          loadSampleBill();
+        }
+
+        // Determine which step to open:
+        // 1. If URL has step=settle -> Settle step (4)
+        // 2. Else if step is stored in sessionStorage -> stored step
+        // 3. Else if payments exist in DB -> Settle step (4)
+        // 4. Otherwise -> step 1
+        const storedStep = getStoredStep();
+        let targetStep = 1;
+
+        if (isSettleParam) {
+          targetStep = 4;
+        } else if (storedStep) {
+          targetStep = storedStep;
+        } else {
+          try {
+            const pResp = await fetch(`${API_BASE}/api/payments`);
+            const payments = await pResp.json();
+            if (Array.isArray(payments) && payments.length > 0) {
+              targetStep = 4;
+            } else {
+              targetStep = 1;
+            }
+          } catch (e) {
+            targetStep = 1;
+          }
+        }
+
+        goToStep(targetStep);
+
+        // If URL has step=settle, fetch /api/payments and /api/settlement-plan, render them, show "Payment received" green toast, and remove query params
+        if (isSettleParam) {
+          await fetchSettlementPlan(false);
+          showToast("Payment received", "success");
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (isCancelledParam) {
+          showToast("PayPal transaction was cancelled.", "warning");
+          window.history.replaceState({}, document.title, window.location.pathname);
+        } else if (isPaidParam) {
+          showToast("Payment received", "success");
+          window.history.replaceState({}, document.title, window.location.pathname);
+        }
       } catch (err) {
         console.error("Initialization error:", err);
       }
@@ -1053,6 +1185,7 @@
       document.getElementById("expenseDescription").value = "South Indian Feast (Sample Receipt)";
 
       renderItemsTable();
+      saveSessionState();
       showToast("Loaded sample restaurant bill (₹1,365.00) with 5% GST.");
     }
 
@@ -1099,16 +1232,19 @@
     function updateItemName(idx, val) {
       state.items[idx].name = val.trim();
       updateLiveTicket();
+      saveSessionState();
     }
 
     function updateItemPrice(idx, val) {
       state.items[idx].price_minor = Math.round(parseFloat(val || 0) * 100);
       renderItemsTable();
+      saveSessionState();
     }
 
     function updateItemQty(idx, val) {
       state.items[idx].qty = Math.max(1, parseInt(val || 1));
       renderItemsTable();
+      saveSessionState();
     }
 
     function deleteItemRow(idx) {
@@ -1117,6 +1253,7 @@
         delete state.assignments[removed.id];
       }
       renderItemsTable();
+      saveSessionState();
     }
 
     function addNewItemRow() {
@@ -1128,6 +1265,7 @@
         qty: 1
       });
       renderItemsTable();
+      saveSessionState();
     }
 
     function onTaxOrDiscountChanged() {
@@ -1135,12 +1273,14 @@
       state.discount_minor = Math.round(parseFloat(document.getElementById("discountInput").value || 0) * 100);
       checkReceiptDiscrepancy();
       updateLiveTicket();
+      saveSessionState();
     }
 
     function onStatedTotalChanged() {
       state.stated_total_minor = Math.round(parseFloat(document.getElementById("statedTotalInput").value || 0) * 100);
       checkReceiptDiscrepancy();
       updateLiveTicket();
+      saveSessionState();
     }
 
     function getCalculatedBillTotal() {
@@ -1168,6 +1308,7 @@
       document.getElementById("statedTotalInput").value = (calc / 100).toFixed(2);
       checkReceiptDiscrepancy();
       updateLiveTicket();
+      saveSessionState();
       showToast("Stated bill total reconciled to match line items + tax.", "success");
     }
 
@@ -1230,6 +1371,7 @@
         document.getElementById("statedTotalInput").value = (state.stated_total_minor / 100).toFixed(2);
 
         renderItemsTable();
+        saveSessionState();
         showToast("Receipt extracted successfully with Gemini Vision!", "success");
       } catch (err) {
         showToast("Error parsing receipt image: " + err, "danger");
@@ -1339,6 +1481,7 @@
         state.assignments[itemId].push(memberName);
       }
       renderMatrix();
+      saveSessionState();
     }
 
     function toggleSelectAllRow(itemId, shouldSelectAll) {
@@ -1348,6 +1491,7 @@
         state.assignments[itemId] = [];
       }
       renderMatrix();
+      saveSessionState();
     }
 
     function validateAssignments(showWarning = true) {
@@ -1409,6 +1553,7 @@
             state.assignments[a.item_id] = a.people || [];
           });
           renderMatrix();
+          saveSessionState();
           
           // Flash animation
           document.querySelectorAll("#matrixTbody tr").forEach(tr => {
@@ -1471,6 +1616,7 @@
 
         const data = await resp.json();
         state.lastBreakdown = data;
+        saveSessionState();
 
         renderBreakdown(data);
         goToStep(3);
@@ -1589,9 +1735,14 @@
     // -------------------------------------------------------------
     async function fetchSettlementPlan(manualRefresh = false) {
       try {
-        const resp = await fetch(`${API_BASE}/api/settlement-plan`);
-        const data = await resp.json();
+        const [planResp, paymentsResp] = await Promise.all([
+          fetch(`${API_BASE}/api/settlement-plan`),
+          fetch(`${API_BASE}/api/payments`)
+        ]);
+        const data = await planResp.json();
+        const payments = await paymentsResp.json();
         state.settlementPlan = data;
+        state.payments = payments;
 
         // Render Optimizer Comparison Numbers
         animateCountUp("transfersCountBefore", data.before_count || 0);
@@ -1609,6 +1760,7 @@
         if (manualRefresh) {
           showToast("Settlement plan and payment statuses refreshed.", "success");
         }
+        return { data, payments };
       } catch (err) {
         showToast("Error retrieving settlement plan: " + err, "danger");
       }
@@ -1995,6 +2147,7 @@
       state.tax_minor = 0;
       state.discount_minor = 0;
       state.stated_total_minor = 0;
+      state.lastBreakdown = null;
       document.getElementById("expenseDescription").value = "New Expense";
       document.getElementById("taxInput").value = "0.00";
       document.getElementById("discountInput").value = "0.00";
@@ -2002,6 +2155,7 @@
       removeReceiptImage();
       renderItemsTable();
       goToStep(1);
+      saveSessionState();
       showToast("Ready for new expense. Existing balances in the ledger are preserved.", "info");
     }
 
@@ -2012,6 +2166,10 @@
         async () => {
           try {
             await fetch(`${API_BASE}/api/reset`, { method: "POST" });
+            try {
+              sessionStorage.removeItem('splitsmart_step');
+              sessionStorage.removeItem('splitsmart_draft');
+            } catch (e) {}
             loadSampleBill();
             goToStep(1);
             showToast("Demo data successfully reset.", "success");
