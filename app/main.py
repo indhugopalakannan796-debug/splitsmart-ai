@@ -86,9 +86,60 @@ async def get_config():
     }
 
 
+class MemberPayload(BaseModel):
+    name: str
+
+
 @app.get("/api/members")
 async def get_members():
     return db.get_members()
+
+
+@app.post("/api/members", status_code=201)
+async def add_member(payload: MemberPayload):
+    name = (payload.name or "").strip()
+    if not (1 <= len(name) <= 20):
+        raise HTTPException(status_code=400, detail="Member name must be between 1 and 20 characters.")
+
+    current = db.get_members()
+    if len(current) >= 8:
+        raise HTTPException(status_code=400, detail="Maximum of 8 group members allowed.")
+
+    if any(m["name"].lower() == name.lower() for m in current):
+        raise HTTPException(status_code=400, detail=f"Member with name '{name}' already exists.")
+
+    return db.add_member(name)
+
+
+@app.put("/api/members/{member_id}")
+async def rename_member(member_id: int, payload: MemberPayload):
+    name = (payload.name or "").strip()
+    if not (1 <= len(name) <= 20):
+        raise HTTPException(status_code=400, detail="Member name must be between 1 and 20 characters.")
+
+    existing = db.get_member_by_id(member_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    current = db.get_members()
+    if any(m["id"] != member_id and m["name"].lower() == name.lower() for m in current):
+        raise HTTPException(status_code=400, detail=f"Member with name '{name}' already exists.")
+
+    return db.rename_member(member_id, name)
+
+
+@app.delete("/api/members/{member_id}")
+async def delete_member(member_id: int):
+    existing = db.get_member_by_id(member_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Member not found.")
+
+    in_use, reason = db.is_member_in_use(member_id)
+    if in_use:
+        raise HTTPException(status_code=409, detail=reason)
+
+    db.delete_member(member_id)
+    return {"status": "ok", "message": f"Member '{existing['name']}' deleted successfully."}
 
 
 @app.post("/api/reset")

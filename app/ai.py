@@ -261,23 +261,36 @@ def _fallback_assignment(
     is_mock: bool = True
 ) -> AssignmentParsed:
     lower_text = text.lower()
-    # Check if text aligns with the demo assignment
-    if any(k in lower_text for k in ["dosa", "biryani", "gulab jamun", "indhu", "ravi", "priya", "karthik"]):
-        # Match demo items by name or id
+
+    def _resolve_member(pref: str, idx: int) -> str:
+        for m in members:
+            if m.lower() == pref.lower():
+                return m
+        return members[idx] if idx < len(members) else (members[0] if members else pref)
+
+    m_indhu = _resolve_member("Indhu", 0)
+    m_ravi = _resolve_member("Ravi", 1)
+    m_priya = _resolve_member("Priya", 2)
+    m_karthik = _resolve_member("Karthik", 3)
+
+    # Check if text aligns with the demo assignment or mentions current members
+    member_keywords = [m.lower() for m in members]
+    if any(k in lower_text for k in ["dosa", "biryani", "gulab jamun", "pizza", "coffee"] + member_keywords):
         assignments = []
         for item in items:
             name_low = str(item.get("name", "")).lower()
             item_id = item.get("id")
             if "dosa" in name_low or "filter coffee" in name_low:
-                assignments.append(AssignmentItem(item_id=item_id, people=["Indhu"]))
+                assignments.append(AssignmentItem(item_id=item_id, people=[m_indhu]))
             elif "biryani" in name_low or "soda" in name_low:
-                assignments.append(AssignmentItem(item_id=item_id, people=["Ravi"]))
+                assignments.append(AssignmentItem(item_id=item_id, people=[m_ravi]))
             elif "fried rice" in name_low or "manchurian" in name_low:
-                assignments.append(AssignmentItem(item_id=item_id, people=["Priya"]))
+                assignments.append(AssignmentItem(item_id=item_id, people=[m_priya]))
             elif "pizza" in name_low or "cold coffee" in name_low:
-                assignments.append(AssignmentItem(item_id=item_id, people=["Karthik"]))
+                assignments.append(AssignmentItem(item_id=item_id, people=[m_karthik]))
             elif "jamun" in name_low:
-                assignments.append(AssignmentItem(item_id=item_id, people=[m for m in ["Indhu", "Ravi", "Priya", "Karthik"] if m in members]))
+                active_group = [m for m in [m_indhu, m_ravi, m_priya, m_karthik] if m in members]
+                assignments.append(AssignmentItem(item_id=item_id, people=active_group if active_group else members))
             else:
                 assignments.append(AssignmentItem(item_id=item_id, people=members))
         return AssignmentParsed(assignments=assignments, is_mock=is_mock)

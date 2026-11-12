@@ -217,6 +217,51 @@
     </div>
   </div>
 
+  <!-- Group Members Modal -->
+  <div id="membersModal" role="dialog" aria-modal="true" aria-labelledby="membersModalTitle" class="fixed inset-0 z-50 bg-ink/40 backdrop-blur-[2px] hidden flex items-center justify-center p-4">
+    <div class="bg-surface rounded-panel max-w-md w-full p-6 shadow-elevated border border-line transform transition-all space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-line">
+        <div class="flex items-center space-x-2">
+          <svg class="w-4 h-4 text-primary" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <h3 id="membersModalTitle" class="font-display font-bold text-ink text-base">Group Members</h3>
+        </div>
+        <button type="button" onclick="closeMembersModal()" aria-label="Close dialog" class="text-muted hover:text-ink p-1 rounded-control">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="space-y-3">
+        <p class="text-xs text-muted leading-relaxed">Manage group members (up to 8). Renaming keeps all existing expense and settlement records linked.</p>
+
+        <!-- Members list -->
+        <div id="membersListContainer" class="divide-y divide-line/60 max-h-60 overflow-y-auto pr-1">
+          <!-- Dynamically populated via renderMembersList() -->
+        </div>
+
+        <!-- Add Person Form -->
+        <div class="pt-3 border-t border-line">
+          <form onsubmit="event.preventDefault(); handleAddMember();" class="flex items-center space-x-2">
+            <input type="text" id="newMemberNameInput" placeholder="Add person (e.g. Maya)" maxlength="20" class="flex-1 text-xs p-2.5 bg-paper/50 paper-border rounded-control focus:bg-surface focus:border-primary font-medium text-ink">
+            <button type="submit" id="addMemberBtn" class="px-3.5 py-2.5 bg-primary hover:bg-primary-hover text-surface text-xs font-semibold rounded-control shadow-sm transition flex items-center space-x-1 shrink-0">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4"/></svg>
+              <span>Add</span>
+            </button>
+          </form>
+          <div class="flex items-center justify-between text-[10px] text-muted font-mono mt-1.5 px-0.5">
+            <span id="membersCountHint">5 of 8 members</span>
+            <span>1-20 characters, unique</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end pt-2 border-t border-line">
+        <button type="button" onclick="closeMembersModal()" class="px-4 py-2 border border-line hover:bg-paper text-muted hover:text-ink text-xs font-semibold rounded-control transition">
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Header / Top Bar -->
   <header class="bg-surface border-b border-line sticky top-0 z-40">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -246,6 +291,12 @@
         <span id="badgeMockPaypal" class="hidden inline-flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-warning/15 text-warning border border-warning/30">
           <span>MOCK PAYPAL</span>
         </span>
+
+        <button type="button" onclick="openMembersModal()" class="text-xs font-semibold px-3 py-1.5 text-ink hover:text-primary rounded-control transition border border-line bg-surface hover:bg-paper flex items-center space-x-1.5" title="Manage Group Members">
+          <svg class="w-3.5 h-3.5 text-muted" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+          <span>Group</span>
+          <span id="groupMembersCountBadge" class="font-mono text-[10px] bg-paper px-1.5 py-0.5 rounded border border-line text-muted font-bold">5</span>
+        </button>
 
         <div class="h-4 w-px bg-line mx-1 hidden sm:block"></div>
 
@@ -1069,6 +1120,9 @@
         const memResp = await fetch(`${API_BASE}/api/members`);
         state.members = await memResp.json();
         populatePaidBySelect();
+        updateAiPromptNames();
+        const groupBadge = document.getElementById("groupMembersCountBadge");
+        if (groupBadge) groupBadge.textContent = state.members.length;
 
         // Listen for metadata changes to keep draft in sync
         const descInput = document.getElementById("expenseDescription");
@@ -1138,12 +1192,18 @@
 
     function populatePaidBySelect() {
       const select = document.getElementById("paidBySelect");
+      if (!select) return;
+      const currentVal = select.value;
       select.innerHTML = "";
-      state.members.forEach(m => {
+      state.members.forEach((m, idx) => {
         const opt = document.createElement("option");
         opt.value = m.id;
         opt.textContent = m.name;
-        if (m.name.toLowerCase() === "karthik") opt.selected = true;
+        if (currentVal && String(m.id) === String(currentVal)) {
+          opt.selected = true;
+        } else if (!currentVal && (m.name.toLowerCase() === "karthik" || idx === 0)) {
+          opt.selected = true;
+        }
         select.appendChild(opt);
       });
     }
@@ -1521,7 +1581,21 @@
     }
 
     function fillExampleSentence() {
-      document.getElementById("aiSentenceInput").value = "Indhu had dosa and coffee, Ravi had biryani and soda, Priya had fried rice and gobi, Karthik had pizza and cold coffee, everyone shared gulab jamun";
+      const names = state.members.map(m => m.name);
+      if (names.length === 0) return;
+      if (names.length === 1) {
+        document.getElementById("aiSentenceInput").value = `${names[0]} had everything`;
+        return;
+      }
+      if (names.length === 2) {
+        document.getElementById("aiSentenceInput").value = `${names[0]} had dosa and coffee, ${names[1]} had biryani and soda, everyone shared gulab jamun`;
+        return;
+      }
+      if (names.length === 3) {
+        document.getElementById("aiSentenceInput").value = `${names[0]} had dosa and coffee, ${names[1]} had biryani, ${names[2]} had fried rice, everyone shared gulab jamun`;
+        return;
+      }
+      document.getElementById("aiSentenceInput").value = `${names[0]} had dosa and coffee, ${names[1]} had biryani, ${names[2]} had fried rice, ${names[3]} had pizza, everyone shared gulab jamun`;
     }
 
     async function submitAiSentence() {
@@ -1934,6 +2008,221 @@
           clearInterval(state.pollingTimer);
           state.pollingTimer = null;
         }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // GROUP MEMBERS MANAGEMENT MODAL
+    // -------------------------------------------------------------
+    function openMembersModal() {
+      renderMembersList();
+      document.getElementById("membersModal").classList.remove("hidden");
+    }
+
+    function closeMembersModal() {
+      document.getElementById("membersModal").classList.add("hidden");
+    }
+
+    function renderMembersList() {
+      const container = document.getElementById("membersListContainer");
+      if (!container) return;
+      container.innerHTML = "";
+
+      const badge = document.getElementById("groupMembersCountBadge");
+      if (badge) badge.textContent = state.members.length;
+
+      const hint = document.getElementById("membersCountHint");
+      if (hint) hint.textContent = `${state.members.length} of 8 members`;
+
+      const addInput = document.getElementById("newMemberNameInput");
+      const addBtn = document.getElementById("addMemberBtn");
+      if (state.members.length >= 8) {
+        if (addInput) {
+          addInput.disabled = true;
+          addInput.placeholder = "Max 8 members reached";
+        }
+        if (addBtn) addBtn.disabled = true;
+      } else {
+        if (addInput) {
+          addInput.disabled = false;
+          addInput.placeholder = "Add person (e.g. Maya)";
+        }
+        if (addBtn) addBtn.disabled = false;
+      }
+
+      state.members.forEach(m => {
+        const style = getAvatarStyle(m.name);
+        const row = document.createElement("div");
+        row.className = "py-2 flex items-center justify-between space-x-2";
+
+        row.innerHTML = `
+          <div class="flex items-center space-x-2.5 flex-1 min-w-0">
+            <span class="inline-flex items-center justify-center font-bold text-[10px] rounded-full shrink-0" style="width:26px;height:26px;background:${style.bg};color:${style.text};border:1px solid ${style.border};">
+              ${getInitials(m.name)}
+            </span>
+            <input type="text" 
+                   value="${escapeHtml(m.name)}" 
+                   maxlength="20" 
+                   title="Click to edit name" 
+                   onchange="handleRenameMember(${m.id}, this.value, '${escapeHtml(m.name)}')" 
+                   class="flex-1 text-xs p-1.5 bg-paper/40 border border-transparent hover:border-line focus:bg-surface focus:border-primary rounded font-semibold text-ink transition">
+          </div>
+          <button type="button" 
+                  onclick="handleDeleteMember(${m.id}, '${escapeHtml(m.name)}')" 
+                  class="p-1.5 text-muted hover:text-danger rounded-control hover:bg-danger/10 transition shrink-0" 
+                  title="Delete ${escapeHtml(m.name)}">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    async function handleAddMember() {
+      const input = document.getElementById("newMemberNameInput");
+      const name = (input ? input.value : "").trim();
+      if (!name) {
+        showToast("Please enter a person's name.", "warning");
+        return;
+      }
+      if (name.length > 20) {
+        showToast("Member name must be 20 characters or less.", "warning");
+        return;
+      }
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/members`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name })
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.detail || "Failed to add member");
+        }
+
+        const data = await resp.json();
+        if (input) input.value = "";
+        await refreshMembersEverywhere();
+        showToast(`Added '${data.name}' to group.`, "success");
+      } catch (err) {
+        showToast(err.message, "danger");
+      }
+    }
+
+    async function handleRenameMember(id, newName, oldName) {
+      const trimmed = (newName || "").trim();
+      if (trimmed === oldName) return;
+
+      if (!trimmed) {
+        showToast("Member name cannot be empty.", "warning");
+        renderMembersList();
+        return;
+      }
+
+      try {
+        const resp = await fetch(`${API_BASE}/api/members/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: trimmed })
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.detail || "Failed to rename member");
+        }
+
+        // Update in-memory assignments draft
+        Object.keys(state.assignments).forEach(itemId => {
+          state.assignments[itemId] = (state.assignments[itemId] || []).map(p => p === oldName ? trimmed : p);
+        });
+
+        // Update lastBreakdown in memory if present
+        if (state.lastBreakdown) {
+          if (state.lastBreakdown.shares && state.lastBreakdown.shares[oldName] !== undefined) {
+            state.lastBreakdown.shares[trimmed] = state.lastBreakdown.shares[oldName];
+            delete state.lastBreakdown.shares[oldName];
+          }
+          if (state.lastBreakdown.breakdown && state.lastBreakdown.breakdown[oldName]) {
+            state.lastBreakdown.breakdown[trimmed] = state.lastBreakdown.breakdown[oldName];
+            state.lastBreakdown.breakdown[trimmed].name = trimmed;
+            delete state.lastBreakdown.breakdown[oldName];
+          }
+          if (state.lastBreakdown.paid_by && state.lastBreakdown.paid_by.name === oldName) {
+            state.lastBreakdown.paid_by.name = trimmed;
+          }
+        }
+
+        await refreshMembersEverywhere();
+        showToast(`Renamed '${oldName}' to '${trimmed}'.`, "success");
+      } catch (err) {
+        renderMembersList();
+        showToast(err.message, "danger");
+      }
+    }
+
+    async function handleDeleteMember(id, name) {
+      try {
+        const resp = await fetch(`${API_BASE}/api/members/${id}`, {
+          method: "DELETE"
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json();
+          throw new Error(err.detail || "Failed to delete member");
+        }
+
+        // Remove from in-memory assignments
+        Object.keys(state.assignments).forEach(itemId => {
+          state.assignments[itemId] = (state.assignments[itemId] || []).filter(p => p !== name);
+        });
+
+        await refreshMembersEverywhere();
+        showToast(`Deleted '${name}' from group.`, "success");
+      } catch (err) {
+        showToast(err.message, "warning");
+      }
+    }
+
+    async function refreshMembersEverywhere() {
+      try {
+        const memResp = await fetch(`${API_BASE}/api/members`);
+        state.members = await memResp.json();
+
+        const badge = document.getElementById("groupMembersCountBadge");
+        if (badge) badge.textContent = state.members.length;
+
+        populatePaidBySelect();
+        renderMatrix();
+        updateLiveTicket();
+
+        if (state.lastBreakdown) {
+          renderBreakdown(state.lastBreakdown);
+        }
+
+        if (state.step === 4) {
+          fetchSettlementPlan(false);
+        }
+
+        renderMembersList();
+        updateAiPromptNames();
+        saveSessionState();
+      } catch (err) {
+        console.error("Error refreshing members:", err);
+      }
+    }
+
+    function updateAiPromptNames() {
+      const input = document.getElementById("aiSentenceInput");
+      if (!input) return;
+      const names = state.members.map(m => m.name);
+      if (names.length >= 2) {
+        input.placeholder = `${names[0]} had dosa and coffee, ${names[1]} had biryani, everyone shared gulab jamun`;
+      } else if (names.length === 1) {
+        input.placeholder = `${names[0]} had everything`;
+      } else {
+        input.placeholder = `Describe who had what in the group`;
       }
     }
 

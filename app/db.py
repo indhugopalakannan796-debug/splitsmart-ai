@@ -1,6 +1,7 @@
 import sqlite3
 import os
-from typing import List, Dict, Any, Optional
+import json
+from typing import List, Dict, Any, Optional, Tuple
 
 DB_PATH = os.environ.get("SQLITE_DB_PATH", "splitsmart.db")
 DEFAULT_MEMBERS = ["Indhu", "Ravi", "Priya", "Karthik", "Arun"]
@@ -107,6 +108,116 @@ def get_or_create_member(name: str) -> Dict[str, Any]:
         conn.commit()
         new_id = cursor.lastrowid
         return {"id": new_id, "name": clean_name}
+
+
+def add_member(name: str) -> Dict[str, Any]:
+    clean_name = name.strip()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO members (name) VALUES (?);", (clean_name,))
+        conn.commit()
+        return {"id": cursor.lastrowid, "name": clean_name}
+
+
+def rename_member(member_id: int, new_name: str) -> Dict[str, Any]:
+    clean_name = new_name.strip()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name FROM members WHERE id = ?;", (member_id,))
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Member with id {member_id} not found")
+        old_name = row["name"]
+
+        cursor.execute("UPDATE members SET name = ? WHERE id = ?;", (clean_name, member_id))
+
+        if old_name != clean_name:
+            cursor.execute("SELECT id, assignments_json, shares_json FROM expenses;")
+            expenses = cursor.fetchall()
+            for exp in expenses:
+                exp_id = exp["id"]
+                raw_assign = exp["assignments_json"]
+                raw_shares = exp["shares_json"]
+                changed = False
+
+                assign_data = []
+                try:
+                    assign_data = json.loads(raw_assign) if raw_assign else []
+                    if isinstance(assign_data, list):
+                        for item in assign_data:
+                            if isinstance(item, dict) and "people" in item and isinstance(item["people"], list):
+                                for idx, p in enumerate(item["people"]):
+                                    if p == old_name:
+                                        item["people"][idx] = clean_name
+                                        changed = True
+                except Exception:
+                    pass
+
+                shares_data = {}
+                try:
+                    shares_data = json.loads(raw_shares) if raw_shares else {}
+                    if isinstance(shares_data, dict) and old_name in shares_data:
+                        shares_data[clean_name] = shares_data.pop(old_name)
+                        changed = True
+                except Exception:
+                    pass
+
+                if changed:
+                    cursor.execute(
+                        "UPDATE expenses SET assignments_json = ?, shares_json = ? WHERE id = ?;",
+                        (json.dumps(assign_data), json.dumps(shares_data), exp_id)
+                    )
+
+        conn.commit()
+        return {"id": member_id, "name": clean_name}
+
+
+def is_member_in_use(member_id: int) -> Tuple[bool, str]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM members WHERE id = ?;", (member_id,))
+        row = cursor.fetchone()
+        if not row:
+            return False, "Member not found"
+        name = row["name"]
+
+        # Check if member paid any expense
+        cursor.execute("SELECT COUNT(*) FROM expenses WHERE paid_by = ?;", (member_id,))
+        if cursor.fetchone()[0] > 0:
+            return True, f"Cannot delete '{name}': they have recorded expenses as payer."
+
+        # Check if member is involved in payments
+        cursor.execute("SELECT COUNT(*) FROM payments WHERE from_member = ? OR to_member = ?;", (member_id, member_id))
+        if cursor.fetchone()[0] > 0:
+            return True, f"Cannot delete '{name}': they are involved in payment transactions."
+
+        # Check if member is in shares or assignments of any existing expense
+        cursor.execute("SELECT assignments_json, shares_json FROM expenses;")
+        for exp in cursor.fetchall():
+            try:
+                shares = json.loads(exp["shares_json"] or "{}")
+                if isinstance(shares, dict) and name in shares and shares[name] > 0:
+                    return True, f"Cannot delete '{name}': they have assigned shares in existing expenses."
+            except Exception:
+                pass
+
+            try:
+                assignments = json.loads(exp["assignments_json"] or "[]")
+                if isinstance(assignments, list):
+                    for item in assignments:
+                        if isinstance(item, dict) and name in item.get("people", []):
+                            return True, f"Cannot delete '{name}': they are assigned items in existing expenses."
+            except Exception:
+                pass
+
+    return False, ""
+
+
+def delete_member(member_id: int) -> None:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM members WHERE id = ?;", (member_id,))
+        conn.commit()
 
 
 def create_expense(
